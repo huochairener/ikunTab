@@ -47,10 +47,22 @@ async function switchByDelta(delta: number) {
 /* ============ 滚轮切换 ============ */
 let wheelLock = false
 // 弹窗/遮罩层/组件：滚轮发生在这些元素内时不切换分组，让内部正常滚动
-const MODAL_SELECTOR = '.mask, .modal-mask, .popup-mask, .ctx-mask, .modal, .drawer, .widget'
+const OVERLAY_SELECTOR = '.mask, .modal-mask, .popup-mask, .ctx-mask, .modal, .drawer'
+const MODAL_SELECTOR = OVERLAY_SELECTOR + ', .widget'
+/** 滚轮方向上页面还能不能滚 */
+function canScrollIn(el: HTMLElement, deltaY: number) {
+  const max = el.scrollHeight - el.clientHeight
+  if (max <= 1) return false
+  if (deltaY > 0) return el.scrollTop < max - 1
+  if (deltaY < 0) return el.scrollTop > 1
+  return false
+}
 function onWheel(e: WheelEvent) {
   const target = e.target as HTMLElement | null
   if (target?.closest?.(MODAL_SELECTOR)) return
+  // 指针在页面内且该方向还能滚：先让浏览器滚页，滚到边界才切分组
+  const scroller = document.querySelector<HTMLElement>('.main')
+  if (scroller && target && scroller.contains(target) && canScrollIn(scroller, e.deltaY)) return
   e.preventDefault()
   if (wheelLock) return
   wheelLock = true
@@ -61,15 +73,29 @@ function onWheel(e: WheelEvent) {
   })
 }
 
-/* ============ 触摸滑动切换 ============ */
+/* ============ 触摸左右滑动切换（整屏） ============ */
+const SWIPE_MIN_X = 60
+// 起手势距屏幕左右边缘太近会撞上车/浏览器返回手势，直接放弃识别
+const EDGE_ZONE = 28
 let touchStartX = 0
 let touchStartY = 0
 let touchActive = false
+let swipeLock = false
 function onTouchStart(e: TouchEvent) {
-  if (e.touches.length !== 1) return
-  touchStartX = e.touches[0].clientX
+  if (e.touches.length !== 1) {
+    touchActive = false
+    return
+  }
+  const target = e.target as HTMLElement | null
+  const x = e.touches[0].clientX
+  // 组件区没有横向滚动，允许在组件上横滑，只排除弹窗/遮罩
+  if (swipeLock || target?.closest?.(OVERLAY_SELECTOR)) {
+    touchActive = false
+    return
+  }
+  touchActive = x > EDGE_ZONE && x < window.innerWidth - EDGE_ZONE
+  touchStartX = x
   touchStartY = e.touches[0].clientY
-  touchActive = true
 }
 function onTouchEnd(e: TouchEvent) {
   if (!touchActive) return
@@ -77,10 +103,15 @@ function onTouchEnd(e: TouchEvent) {
   const t = e.changedTouches[0]
   const dx = t.clientX - touchStartX
   const dy = t.clientY - touchStartY
-  // 横向滑动占主导
-  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
-    switchByDelta(dx < 0 ? 1 : -1)
-  }
+  // 横向位移明显占主导才算切组，斜向滚动不误触
+  if (Math.abs(dx) < SWIPE_MIN_X || Math.abs(dx) < Math.abs(dy) * 1.4) return
+  swipeLock = true
+  setTimeout(() => (swipeLock = false), 450)
+  showDock()
+  switchByDelta(dx < 0 ? 1 : -1)
+}
+function onTouchCancel() {
+  touchActive = false
 }
 
 /* ============ 键盘快捷键 Alt+1~9 ============ */
@@ -99,11 +130,18 @@ onMounted(() => {
   window.addEventListener('wheel', onWheel, { passive: false })
   // 鼠标移到底部区域唤起
   window.addEventListener('mousemove', onMouseMove)
+  // 整屏左右滑动切组：passive 保证纵向滚动不受影响
+  window.addEventListener('touchstart', onTouchStart, { passive: true })
+  window.addEventListener('touchend', onTouchEnd, { passive: true })
+  window.addEventListener('touchcancel', onTouchCancel)
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('wheel', onWheel)
   window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('touchstart', onTouchStart)
+  window.removeEventListener('touchend', onTouchEnd)
+  window.removeEventListener('touchcancel', onTouchCancel)
 })
 
 function onMouseMove(e: MouseEvent) {
@@ -163,8 +201,6 @@ defineExpose({ showDock, startEdit, deleteGroup })
     :class="{ hovered: dockHover }"
     @mouseenter="keepDock"
     @mouseleave="showDock"
-    @touchstart="onTouchStart"
-    @touchend="onTouchEnd"
   >
     <div class="dock-arc">
       <div class="dock-inner glass">
@@ -240,6 +276,14 @@ defineExpose({ showDock, startEdit, deleteGroup })
   transform: translateX(-50%) translateY(0);
   opacity: 1;
   pointer-events: auto;
+}
+/* 触摸设备没有 mousemove/hover 来唤起 dock，改为常驻，否则无法切换分组 */
+@media (hover: none) {
+  .dock-wrap {
+    opacity: 1;
+    transform: translateX(-50%);
+    pointer-events: auto;
+  }
 }
 .dock-arc {
   position: relative;

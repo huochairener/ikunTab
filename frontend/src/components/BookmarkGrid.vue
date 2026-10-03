@@ -339,6 +339,13 @@ defineExpose({ addBookmark: onAdd })
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
 }
+/* 窄屏收窄卡片，避免单列铺满导致页面过长 */
+@media (max-width: 900px) {
+  .grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+}
+@media (max-width: 640px) {
+  .grid { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 8px; }
+}
 .hint-sub { font-size: 12px; color: var(--text-secondary); opacity: 0.7; }
 .empty-hint {
   display: flex; flex-direction: column; align-items: center; gap: 12px;

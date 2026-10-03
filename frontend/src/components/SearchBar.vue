@@ -73,7 +73,7 @@ defineExpose({ focus })
 </template>
 
 <style scoped>
-.search { position: relative; width: min(620px, 86vw); }
+.search { position: relative; width: min(620px, 100%); }
 .bar {
   display: flex; align-items: center; gap: 4px;
   padding: 6px 6px 6px 12px; border-radius: 999px;

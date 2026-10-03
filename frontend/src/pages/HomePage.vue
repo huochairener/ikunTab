@@ -95,8 +95,8 @@ async function toggleThemeQuick() {
 
 function onGroupEntered() {
   app.finishSwitch()
-  // 默认聚焦搜索框；仅在用户显式关闭（autoFocusSearch === 0）时跳过
-  if (app.settings?.autoFocusSearch !== 0) {
+  // 默认聚焦搜索框；用户显式关闭（autoFocusSearch === 0）或触摸设备（弹键盘会遮住大半屏）时跳过
+  if (app.settings?.autoFocusSearch !== 0 && !window.matchMedia('(hover: none)').matches) {
     searchBarRef.value?.focus()
   }
 }
@@ -193,7 +193,9 @@ const transitionName = computed(() => {
 
 <style scoped>
 .home {
-  height: 100%; width: 100%;
+  height: 100%;
+  height: 100dvh;
+  width: 100%;
   position: relative;
   overflow: hidden;
 }
@@ -236,12 +238,17 @@ const transitionName = computed(() => {
 /* 主区域 */
 .main {
   height: 100%; width: 100%;
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
+  /* 居中交给 .group-page 的 margin:auto：flex 居中在内容超高时会把顶部推出
+     滚动区，而溢出方向只有底部可滚，书签多时搜索框会永远点不到 */
+  align-items: flex-start;
+  justify-content: flex-start;
   padding: 0 20px 80px;
   box-sizing: border-box;
   overflow-y: auto;
 }
 .group-page {
+  margin: auto;
   width: min(1180px, 100%);
   display: flex; flex-direction: column; align-items: center;
   gap: 24px;
@@ -258,6 +265,12 @@ const transitionName = computed(() => {
   width: 100%;
   display: flex; flex-direction: column;
   gap: 20px;
+}
+
+/* 移动端：收窄留白，底部给常驻 dock 让位 */
+@media (max-width: 640px) {
+  .main { padding: 0 12px 90px; }
+  .group-page { gap: 16px; padding-top: 64px; padding-bottom: 20px; }
 }
 
 /* 全局右键菜单 */

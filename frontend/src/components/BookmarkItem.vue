@@ -129,7 +129,9 @@ function onClick() {
   background: var(--card-bg); border: 1px solid var(--glass-border);
   backdrop-filter: blur(12px); transition: transform 0.15s, box-shadow 0.15s;
 }
-.bm-inner:hover { transform: translateY(-2px); box-shadow: var(--glass-shadow); }
+@media (hover: hover) {
+  .bm-inner:hover { transform: translateY(-2px); box-shadow: var(--glass-shadow); }
+}
 .icon-wrap {
   position: relative; width: 34px; height: 34px; border-radius: 9px;
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
@@ -214,6 +216,11 @@ function onClick() {
 }
 .bm:hover .more { opacity: 1; }
 .more:hover { background: var(--input-bg); }
+/* 触摸设备：补上只有 hover 才可见的操作入口，并避免横滑切组时误选文字 */
+@media (hover: none) {
+  .more { opacity: 0.55; }
+  .bm { -webkit-user-select: none; user-select: none; }
+}
 .hv-merge { border-color: var(--accent); }
 .hv-before { border-left-color: var(--accent); border-left-style: solid; }
 .hv-after { border-right-color: var(--accent); border-right-style: solid; }
