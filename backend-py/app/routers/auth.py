@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..deps import current_user_id
+from ..deps import current_user_id, require_user_id
 from ..response import ok
-from ..schemas.auth import LoginIn, RegisterIn
+from ..schemas.auth import ChangePasswordIn, LoginIn, RegisterIn
 from ..services import auth as auth_svc
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -31,6 +31,19 @@ async def login(dto: LoginIn, response: Response, db: AsyncSession = Depends(get
 @router.post("/logout")
 async def logout(response: Response):
     await auth_svc.logout(response)
+    return ok()
+
+
+@router.post("/change-password")
+async def change_password(
+    dto: ChangePasswordIn,
+    response: Response,
+    uid: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await auth_svc.change_password(
+        db, uid, old_password=dto.oldPassword, new_password=dto.newPassword, response=response
+    )
     return ok()
 
 

@@ -9,6 +9,8 @@ export const api = {
     http.post<User>('/auth/login', data).then((r) => r.data),
   logout: () => http.post('/auth/logout').then((r) => r.data),
   me: () => http.get<User>('/auth/me').then((r) => r.data),
+  changePassword: (data: { oldPassword: string; newPassword: string }) =>
+    http.post('/auth/change-password', data).then((r) => r.data),
 
   // groups
   groups: () => http.get<Group[]>('/groups').then((r) => r.data),

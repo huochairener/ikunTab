@@ -8,8 +8,8 @@ const router = useRouter()
 const user = useUserStore()
 const app = useAppStore()
 
-const username = ref('demo')
-const password = ref('demo123456')
+const username = ref('')
+const password = ref('')
 const loading = ref(false)
 const error = ref('')
 
@@ -55,7 +55,6 @@ async function onSubmit() {
       <p class="switch">
         还没有账号？<router-link to="/register">立即注册</router-link>
       </p>
-      <p class="hint">演示账号：demo / demo123456</p>
     </form>
   </div>
 </template>
@@ -98,5 +97,4 @@ async function onSubmit() {
 .switch { font-size: 13px; text-align: center; color: var(--text-secondary); margin-top: 4px; }
 .switch a { color: var(--accent); text-decoration: none; }
 .err { color: #ff5c5c; font-size: 13px; margin: 0; }
-.hint { font-size: 11px; text-align: center; color: var(--text-secondary); opacity: 0.7; margin: 0; }
 </style>

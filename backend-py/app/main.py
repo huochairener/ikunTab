@@ -48,6 +48,14 @@ async def _init_schema() -> None:
             # MySQL 5.7 / 部分版本不支持 ADD COLUMN IF NOT EXISTS，需先查 information_schema
             def _ensure_columns(sync_conn):
                 insp = inspect(sync_conn)
+                user_cols = {c["name"] for c in insp.get_columns("tab_user")}
+                if "pwd_version" not in user_cols:
+                    sync_conn.execute(
+                        text(
+                            "ALTER TABLE tab_user "
+                            "ADD COLUMN pwd_version INT NOT NULL DEFAULT 0"
+                        )
+                    )
                 existing = {c["name"] for c in insp.get_columns("tab_user_setting")}
                 if "transition_animation" not in existing:
                     sync_conn.execute(

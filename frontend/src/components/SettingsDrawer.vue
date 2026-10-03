@@ -290,6 +290,42 @@ async function markDefault(e: SearchEngine) {
   app.engines = await api.engines()
 }
 
+/* ============ 账户：修改密码 ============ */
+const pwdForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
+const pwdSaving = ref(false)
+const pwdError = ref('')
+const pwdDone = ref('')
+
+async function submitPassword() {
+  pwdError.value = ''
+  pwdDone.value = ''
+  if (!pwdForm.value.oldPassword || !pwdForm.value.newPassword) {
+    pwdError.value = '请填写当前密码和新密码'
+    return
+  }
+  if (pwdForm.value.newPassword.length < 6) {
+    pwdError.value = '新密码至少 6 位'
+    return
+  }
+  if (pwdForm.value.newPassword !== pwdForm.value.confirmPassword) {
+    pwdError.value = '两次输入的新密码不一致'
+    return
+  }
+  pwdSaving.value = true
+  try {
+    await api.changePassword({
+      oldPassword: pwdForm.value.oldPassword,
+      newPassword: pwdForm.value.newPassword,
+    })
+    pwdForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+    pwdDone.value = '密码已更新，下次登录请用新密码'
+  } catch (e: any) {
+    pwdError.value = e.message || '修改失败'
+  } finally {
+    pwdSaving.value = false
+  }
+}
+
 /* ============ 退出登录 ============ */
 async function logout() {
   await user.logout()
@@ -462,6 +498,25 @@ async function logout() {
             <div class="user-info">
               <div class="u-name">{{ user.user?.username }}</div>
               <div class="u-id">ID: {{ user.user?.id }}</div>
+            </div>
+            <div class="pwd-form">
+              <label class="field">
+                <span>当前密码</span>
+                <input v-model="pwdForm.oldPassword" type="password" class="input" autocomplete="current-password" />
+              </label>
+              <label class="field">
+                <span>新密码</span>
+                <input v-model="pwdForm.newPassword" type="password" class="input" autocomplete="new-password" />
+              </label>
+              <label class="field">
+                <span>确认新密码</span>
+                <input v-model="pwdForm.confirmPassword" type="password" class="input" autocomplete="new-password" />
+              </label>
+              <p v-if="pwdError" class="pwd-msg bad">{{ pwdError }}</p>
+              <p v-if="pwdDone" class="pwd-msg good">{{ pwdDone }}</p>
+              <button class="btn btn-primary pwd-submit" :disabled="pwdSaving" @click="submitPassword">
+                {{ pwdSaving ? '保存中…' : '修改密码' }}
+              </button>
             </div>
             <button class="btn btn-ghost logout" @click="logout">退出登录</button>
           </section>
@@ -741,6 +796,16 @@ async function logout() {
 .u-name { font-size: 14px; font-weight: 500; }
 .u-id { font-size: 11px; color: var(--text-secondary); }
 .logout { width: 100%; }
+
+.pwd-form {
+  margin-bottom: 10px; padding: 14px;
+  border-radius: 12px; background: var(--card-bg);
+  border: 1px solid var(--glass-border);
+}
+.pwd-msg { font-size: 12px; margin: 0 0 8px; }
+.pwd-msg.bad { color: #ff6b6b; }
+.pwd-msg.good { color: var(--accent); }
+.pwd-submit { width: 100%; }
 
 .bg-types { display: flex; flex-direction: column; gap: 8px; }
 .bg {
