@@ -27,3 +27,6 @@ uploads/
 # IDE
 .idea/
 .vscode/
+
+# WorkBuddy 项目数据（非临时缓存，不进版本库）
+.workbuddy/

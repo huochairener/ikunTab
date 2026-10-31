@@ -1,5 +1,6 @@
 from __future__ import annotations
 """认证业务：注册、登录、当前用户。"""
+import asyncio
 import logging
 from typing import Optional
 
@@ -45,7 +46,9 @@ async def register(db: AsyncSession, *, username: str, password: str, email: Opt
     if exists:
         raise BizException("用户名已存在", 400)
     _check_password(password)
-    u = User(username=username, password=hash_password(password), email=email)
+    # bcrypt 是 CPU 密集的同步调用（约 100ms），必须丢线程池，否则会阻塞整个事件循环
+    hashed = await asyncio.to_thread(hash_password, password)
+    u = User(username=username, password=hashed, email=email)
     db.add(u)
     await db.commit()
     await db.refresh(u)
@@ -55,7 +58,7 @@ async def register(db: AsyncSession, *, username: str, password: str, email: Opt
 async def login(db: AsyncSession, *, username: str, password: str, response: Response) -> dict:
     res = await db.execute(select(User).where(User.username == username))
     u: Optional[User] = res.scalar_one_or_none()
-    if u is None or not verify_password(password, u.password):
+    if u is None or not await asyncio.to_thread(verify_password, password, u.password):
         raise BizException("用户名或密码错误", 401)
     _set_token_cookie(response, u)
     return _to_me(u)
@@ -67,10 +70,10 @@ async def change_password(
     u = await db.get(User, uid)
     if u is None:
         raise BizException("未登录", 401)
-    if not verify_password(old_password, u.password):
+    if not await asyncio.to_thread(verify_password, old_password, u.password):
         raise BizException("当前密码不正确", 400)
     _check_password(new_password)
-    u.password = hash_password(new_password)
+    u.password = await asyncio.to_thread(hash_password, new_password)
     # 版本号 +1 使其他设备上已签发的 token 立刻失效
     u.pwd_version = (u.pwd_version or 0) + 1
     await db.commit()

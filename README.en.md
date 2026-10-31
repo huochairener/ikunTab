@@ -144,7 +144,8 @@ IKUN_MYSQL_PASSWORD=your_password
 IKUN_JWT_SECRET=your_long_random_jwt_secret
 IKUN_JWT_COOKIE_NAME=ikun_token
 IKUN_UPLOAD_DIR=/tmp/ikun-uploads
-IKUN_CORS_ORIGINS=*
+# CORS allowed origins (comma-separated; defaults cover local dev, no config needed for same-origin deploys; "*" disables credentials)
+IKUN_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 # Hotlist aggregator service URL (optional, default http://localhost:3000)
 IKUN_HOTLIST_API_URL=http://localhost:3000
 ```

@@ -26,14 +26,15 @@ class Settings(BaseSettings):
     upload_dir: str = "/tmp/ikun-uploads"
     upload_url_prefix: str = "/uploads"
 
-    # CORS
-    cors_origins: str = "*"
+    # CORS：逗号分隔的具体来源列表；生产同源部署（Nginx 反代）无需配置。
+    # 出于安全考虑不再默认 "*"：通配 + 凭证意味着任意站点都能带 cookie 跨域调用 API。
+    # 确需通配（纯公开 API）时可显式设 IKUN_CORS_ORIGINS=*，此时服务端会强制关闭 credentials。
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # 第三方代理
     hotlist_api_url: str = "http://localhost:3000"
     hotlist_cache_minutes: int = 20
     weather_cache_minutes: int = 30
-    favicon_cache_days: int = 7
 
     @property
     def database_url(self) -> str:

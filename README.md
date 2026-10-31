@@ -146,7 +146,8 @@ IKUN_MYSQL_PASSWORD=your_password
 IKUN_JWT_SECRET=your_long_random_jwt_secret
 IKUN_JWT_COOKIE_NAME=ikun_token
 IKUN_UPLOAD_DIR=/tmp/ikun-uploads
-IKUN_CORS_ORIGINS=*
+# CORS 允许的来源（逗号分隔；默认含本地开发来源，生产同源部署无需配置；设为 * 将强制关闭凭证）
+IKUN_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 # 热榜聚合服务地址（可选，默认 http://localhost:3000）
 IKUN_HOTLIST_API_URL=http://localhost:3000
 ```

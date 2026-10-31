@@ -1,39 +1,21 @@
 from __future__ import annotations
-"""第三方代理：favicon / 天气 / 热榜，含内存 TTL 缓存。"""
-import asyncio
-import time
-from typing import Any, Dict, Optional, Tuple
+"""第三方代理：favicon / 天气 / 热榜，含进程内 TTL 缓存。"""
+from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
 import orjson
+from cachetools import TTLCache
 
 from ..config import get_settings
 
 settings = get_settings()
 
-# 进程内 TTL 缓存：(expire_ts, value)
-_cache: Dict[str, Tuple[float, Any]] = {}
-_cache_lock = asyncio.Lock()
-
-
-async def _cache_get(key: str):
-    async with _cache_lock:
-        item = _cache.get(key)
-        if item is None:
-            return None
-        expire, value = item
-        if expire < time.time():
-            _cache.pop(key, None)
-            return None
-        return value
-
-
-async def _cache_set(key: str, value: Any, ttl: int) -> None:
-    if value is None:
-        return
-    async with _cache_lock:
-        _cache[key] = (time.time() + ttl, value)
+# cachetools.TTLCache：LRU + TTL 双重淘汰，容量有上限，键不会无限增长。
+# 单事件循环内 get/set 之间没有 await，同步操作天然原子，无需加锁；
+# 只有跨 await 的"检查-写入"才有并发问题，而重复回源一次代价可接受。
+_weather_cache = TTLCache(maxsize=256, ttl=settings.weather_cache_minutes * 60)
+_hotlist_cache = TTLCache(maxsize=64, ttl=settings.hotlist_cache_minutes * 60)
 
 
 def _extract_domain(url: str) -> Optional[str]:
@@ -50,16 +32,11 @@ def _extract_domain(url: str) -> Optional[str]:
 
 
 async def favicon(url: str) -> Optional[str]:
+    """返回第三方 icon 服务的直链，由浏览器直接加载，无需服务端缓存。"""
     domain = _extract_domain(url)
     if not domain:
         return None
-    key = f"favicon::{domain}"
-    cached = await _cache_get(key)
-    if cached is not None:
-        return cached
-    result = f"https://icon.horse/icon/{domain}"
-    await _cache_set(key, result, settings.favicon_cache_days * 86400)
-    return result
+    return f"https://icon.horse/icon/{domain}"
 
 
 _WMO_CODE_DESC = [
@@ -84,8 +61,8 @@ def _wmo_desc(code: int) -> str:
 
 
 async def weather(city: Optional[str], lat: Optional[float], lon: Optional[float]) -> Optional[str]:
-    cache_key = f"weather::{city or ''}::{lat}::{lon}"
-    cached = await _cache_get(cache_key)
+    cache_key = f"{city or ''}::{lat}::{lon}"
+    cached = _weather_cache.get(cache_key)
     if cached is not None:
         return cached
     try:
@@ -125,7 +102,7 @@ async def weather(city: Optional[str], lat: Optional[float], lon: Optional[float
                 "wind": cur.get("wind_speed_10m"),
             }
             out = orjson.dumps(payload).decode()
-            await _cache_set(cache_key, out, settings.weather_cache_minutes * 60)
+            _weather_cache[cache_key] = out
             return out
     except Exception:
         return None
@@ -142,8 +119,8 @@ _HOTLIST_TYPE_MAP = {
 
 
 async def hotlist(source: str) -> str:
-    cache_key = f"hotlist::{source}"
-    cached = await _cache_get(cache_key)
+    cache_key = source
+    cached = _hotlist_cache.get(cache_key)
     if cached is not None:
         return cached
     t = _HOTLIST_TYPE_MAP.get(source, "weibo")
@@ -167,7 +144,7 @@ async def hotlist(source: str) -> str:
                 )
             payload = orjson.dumps(out).decode()
             if payload != "[]":
-                await _cache_set(cache_key, payload, settings.hotlist_cache_minutes * 60)
+                _hotlist_cache[cache_key] = payload
             return payload
     except Exception:
         return "[]"

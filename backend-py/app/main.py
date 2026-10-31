@@ -121,11 +121,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS：通配来源与凭证不能同开，否则 Starlette 会反射任意 Origin 并允许携带 cookie，
+# 等于向所有网站开放用户会话。配置为 * 时强制关闭 credentials（仅适合纯公开 API）。
+_cors_origins = settings.cors_origin_list
+if "*" in _cors_origins:
+    log.warning(
+        "IKUN_CORS_ORIGINS=* 会向任意来源放开跨域，且已强制关闭 credentials（cookie 将无法跨域携带）；"
+        "生产环境建议配置具体前端来源"
+    )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials="*" not in _cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -133,17 +140,20 @@ app.add_middleware(
 
 @app.exception_handler(BizException)
 async def biz_exception_handler(_: Request, exc: BizException):
+    # 业务错误走 200 + code 的 R<T> 约定，前端拦截器解包处理
     return JSONResponse(status_code=200, content=fail(exc.msg, exc.code))
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(_: Request, exc: Exception):
+    # 未处理异常必须返回真实 5xx：网关、监控、前端错误分支都依赖状态码感知故障
     msg = str(exc)
     if "Can't connect to MySQL" in msg or "Connection refused" in msg or "OperationalError" in msg:
         log.error("DB 不可用：%s", exc)
-        return JSONResponse(status_code=200, content=fail("数据库暂不可用，请稍后重试", 503))
+        return JSONResponse(status_code=503, content=fail("数据库暂不可用，请稍后重试", 503))
     log.exception("unhandled error: %s", exc)
-    return JSONResponse(status_code=200, content=fail(f"系统异常：{exc}", 500))
+    # 不把内部异常细节暴露给客户端，详情只进日志
+    return JSONResponse(status_code=500, content=fail("系统异常，请稍后重试", 500))
 
 
 # 业务路由
