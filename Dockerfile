@@ -16,12 +16,19 @@ FROM python:3.12-alpine AS deps
 
 WORKDIR /app
 
+# 构建期可切换镜像源；默认值与官方一致，不改变默认行为
+ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
+ARG PIP_INDEX_URL=https://pypi.org/simple
+
 # 仅安装 bcrypt 等需要的系统依赖；alpine 已自带 libffi / openssl
-RUN apk add --no-cache libffi openssl
+RUN sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories && \
+    apk add --no-cache libffi openssl
 
 COPY backend-py/requirements.txt ./
-# 优先 wheels，避免本地编译耗时
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+# 优先 wheels，避免本地编译耗时；加大超时/重试，避免慢网下 pip 误报 "versions: none"
+RUN pip install --no-cache-dir --timeout 120 --retries 10 \
+    --index-url ${PIP_INDEX_URL} \
+    --prefix=/install -r requirements.txt
 
 
 # Stage 3: Runtime
@@ -29,7 +36,10 @@ FROM python:3.12-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache libffi openssl curl tini && \
+ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
+
+RUN sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories && \
+    apk add --no-cache libffi openssl curl tini && \
     addgroup -S app && adduser -S app -G app
 
 # 复制已安装的 Python 包
