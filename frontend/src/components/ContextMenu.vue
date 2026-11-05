@@ -37,7 +37,7 @@ const top = Math.min(props.y, window.innerHeight - 180)
   <Teleport to="body">
   <div class="ctx glass" :style="{ left: left + 'px', top: top + 'px' }">
     <button v-if="bm.type === 0" class="item" @click="act('open')">
-      <ExternalLink :size="14" /> 打开
+      <ExternalLink :size="14" /> 新标签页打开
     </button>
     <button v-if="bm.parentId !== null" class="item" @click="act('split')">
       <ArrowUp :size="14" /> 移出文件夹

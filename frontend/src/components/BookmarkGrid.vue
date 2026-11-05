@@ -223,7 +223,9 @@ function onMenuAction(action: string, bm: Bookmark) {
       break
     case 'open':
       if (bm.type === 1) onOpenFolder(bm)
-      else if (bm.url) window.open(bm.url, app.bookmarkOpenTarget === 'self' ? '_self' : '_blank')
+      // 右键菜单的「打开」固定新标签页，不受「书签打开方式」设置影响；
+      // noopener/noreferrer 防止目标页通过 window.opener 反向操作首页
+      else if (bm.url) window.open(bm.url, '_blank', 'noopener,noreferrer')
       break
     case 'delete':
       onDelete(bm)
