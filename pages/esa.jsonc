@@ -1,0 +1,22 @@
+{
+  // ESA 函数和Pages 配置（GitHub 导入时生效；CLI 部署时 entry/assets 生效）
+  // 控制台创建 Pages 时：根目录填 /pages，其余项留空由本文件覆盖。
+  "name": "ikun-tab-pages",
+  "description": "ikun-tab 备用站：静态前端 + /api 后端（与 Python 主站共用 MySQL）",
+
+  // 函数入口：同时承载 Pages 的边缘函数与 Node 运行时
+  "entry": "./src/index.js",
+
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+
+  "assets": {
+    "directory": "./dist",
+    // 前端是 Vue SPA（history 路由），导航请求兜底到 index.html
+    "notFoundStrategy": "singlePageApplication"
+  },
+
+  "dev": {
+    "port": 18080
+  }
+}

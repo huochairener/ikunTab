@@ -1,0 +1,20 @@
+{
+  "name": "ikun-tab-pages",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "ikun-tab 的 ESA 函数和Pages 备用站（与 Python 主站共用 MySQL 数据库）",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev-server.mjs",
+    "check": "node scripts/check.mjs",
+    "deploy": "esa-cli deploy"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "mysql2": "^3.11.5"
+  }
+}

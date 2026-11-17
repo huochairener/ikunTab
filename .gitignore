@@ -13,6 +13,10 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 
+# ESA 备用站（pages/）
+pages/dist/
+pages/.env
+
 # Python 后端托管的前端构建产物（由 Docker 多阶段构建生成）
 backend-py/static/
 
