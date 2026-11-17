@@ -57,7 +57,9 @@ function toBool(raw) {
  * @param {Record<string, unknown>} runtimeEnv 边缘函数 fetch 的 env 参数 / 云函数 process.env / 本地 .env
  */
 export function createConfig(runtimeEnv = {}) {
-  const nodeEnv = typeof process !== 'null' && process?.env ? process.env : {};
+  // 注意：边缘运行时（V8 Isolate）没有全局 process，必须用 typeof 安全探测，
+  // 不能直接引用 process，否则未声明变量会抛 ReferenceError。
+  const nodeEnv = typeof process !== 'undefined' && process?.env ? process.env : {};
   const get = (key) => firstDefined(runtimeEnv?.[key], nodeEnv?.[key], DEFAULTS[key]);
 
   const source = (get('IKUN_DATA_SOURCE') || 'auto').toLowerCase();
