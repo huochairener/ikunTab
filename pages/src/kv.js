@@ -43,9 +43,11 @@ async function kvGet(kv, key) {
   try {
     let value = null;
     if (typeof kv.get === 'function') {
-      value = await kv.get(key, { type: 'text' });
+      value = await kv.get(key);
     } else if (typeof kv.getJSON === 'function') {
       value = await kv.getJSON(key);
+    } else if (typeof kv.read === 'function') {
+      value = await kv.read(key);
     }
     if (value === undefined || value === null) return null;
     // 有的实现直接返回对象，有的返回 JSON 字符串，两种都要兼容
@@ -64,19 +66,29 @@ async function kvGet(kv, key) {
 }
 
 async function kvPut(kv, key, value) {
-  try {
-    if (typeof kv.put === 'function') {
-      await kv.put(key, JSON.stringify(value));
+  const serialized = JSON.stringify(value);
+  const errors = [];
+  // 不同平台的 KV 写入 API 名称不同，按可能性依次尝试，全部失败才报错。
+  const attempts = [
+    ['put', () => kv.put(key, serialized)],
+    ['put', () => kv.put(key, value)],
+    ['set', () => kv.set(key, serialized)],
+    ['putJSON', () => kv.putJSON(key, value)],
+    ['setJSON', () => kv.setJSON(key, value)],
+  ];
+  for (const [name, fn] of attempts) {
+    if (typeof kv[name] !== 'function') continue;
+    try {
+      await fn();
       return;
+    } catch (err) {
+      errors.push(`${name}: ${err?.message || err}`);
     }
-    if (typeof kv.putJSON === 'function') {
-      await kv.putJSON(key, value);
-      return;
-    }
-    throw new Error('KV 句柄不支持写入');
-  } catch (err) {
-    throw normKVError(err);
   }
+  const detail = errors.length
+    ? `已尝试的写入方式均失败（${errors.join('; ')}）`
+    : `KV 句柄上没有任何可用的写入方法（实际类型：${typeof kv}）`;
+  throw normKVError(new Error(detail));
 }
 
 /** 读取整份快照；未同步过返回 null */
@@ -118,4 +130,90 @@ export async function writeSnapshot(cfg, snapshot) {
 export async function snapshotReady(cfg) {
   const snap = await readSnapshot(cfg);
   return Boolean(snap && snap.updatedAt > 0);
+}
+
+/**
+ * 诊断：返回 KV 绑定的真实形态，用于排查「KV 句柄不支持写入」这类问题。
+ * 只读操作，不写入任何业务数据（会尝试一次写测试 key 来确认写能力）。
+ */
+export async function inspectKV(cfg) {
+  const env = cfg?.env || {};
+  const bindingName = cfg?.kvBinding || 'IKUN_KV';
+  const kv = getKV(cfg);
+
+  const info = {
+    bindingName,
+    found: Boolean(kv),
+    typeofValue: kv === null || kv === undefined ? 'undefined' : typeof kv,
+    // 列出对象上所有可枚举 + 原型链上的方法名
+    methods: [],
+    ownKeys: [],
+    protoKeys: [],
+    envKeysSample: Object.keys(env).slice(0, 60),
+    writeTest: null,
+    readTest: null,
+  };
+
+  if (kv && typeof kv === 'object') {
+    try {
+      info.ownKeys = Object.keys(kv);
+    } catch {
+      /* ignore */
+    }
+    try {
+      const proto = Object.getPrototypeOf(kv);
+      info.protoKeys = proto ? Object.getOwnPropertyNames(proto) : [];
+    } catch {
+      /* ignore */
+    }
+    const seen = new Set();
+    for (const key of [...info.ownKeys, ...info.protoKeys]) {
+      try {
+        if (typeof kv[key] === 'function') seen.add(key);
+      } catch {
+        /* ignore */
+      }
+    }
+    info.methods = [...seen].sort();
+  }
+
+  // 尝试写入一个测试 key，确认写能力与具体 API 形式
+  if (kv) {
+    const testKey = `__kv_probe_${Date.now()}`;
+    const testValue = 'ok';
+    const attempts = [];
+    const tryCall = async (label, fn) => {
+      try {
+        await fn();
+        attempts.push({ api: label, ok: true });
+        return true;
+      } catch (err) {
+        attempts.push({ api: label, ok: false, error: String(err?.message || err) });
+        return false;
+      }
+    };
+
+    if (typeof kv.put === 'function') {
+      await tryCall('put(key, string)', () => kv.put(testKey, testValue));
+    }
+    if (typeof kv.set === 'function') {
+      await tryCall('set(key, string)', () => kv.set(testKey, testValue));
+    }
+    if (typeof kv.putJSON === 'function') {
+      await tryCall('putJSON(key, obj)', () => kv.putJSON(testKey, { v: 1 }));
+    }
+
+    // 读回
+    try {
+      let v = null;
+      if (typeof kv.get === 'function') v = await kv.get(testKey, { type: 'text' });
+      else if (typeof kv.getJSON === 'function') v = await kv.getJSON(testKey);
+      info.readTest = { ok: true, value: typeof v === 'object' ? v : String(v) };
+    } catch (err) {
+      info.readTest = { ok: false, error: String(err?.message || err) };
+    }
+    info.writeTest = attempts;
+  }
+
+  return info;
 }

@@ -15,7 +15,8 @@
     "test:mirror": "node scripts/mirror-test.mjs",
     "sync": "node scripts/sync-push.mjs",
     "push": "node scripts/push.mjs",
-    "push:dry": "node scripts/push.mjs --dry-run"
+    "push:dry": "node scripts/push.mjs --dry-run",
+    "kv:debug": "node scripts/kv-debug.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

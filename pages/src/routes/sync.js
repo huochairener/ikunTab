@@ -3,7 +3,7 @@
 // 鉴权：共享密钥（IKUN_SYNC_SECRET），主站需带 Authorization: Bearer <密钥>。
 // 语义：整份快照覆盖写入（全量）。数据量小（单人使用），全量最简单、不会半新半旧。
 import { BizError, json, ok, readJson } from '../http.js';
-import { writeSnapshot } from '../kv.js';
+import { writeSnapshot, inspectKV } from '../kv.js';
 
 function timingSafeEqual(a, b) {
   const x = String(a || '');
@@ -85,4 +85,14 @@ export async function sync(ctx) {
   );
 }
 
-export const syncRoutes = [['POST', '/api/sync', sync]];
+/** 诊断 KV 绑定形态：需要同步密钥，避免暴露给公众 */
+export async function kvDebug(ctx) {
+  assertAuthorized(ctx);
+  const info = await inspectKV(ctx.cfg);
+  return json(ok(info));
+}
+
+export const syncRoutes = [
+  ['POST', '/api/sync', sync],
+  ['GET', '/api/kv-debug', kvDebug],
+];
