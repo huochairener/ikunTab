@@ -1,234 +1,307 @@
-// KV 存储层：只读镜像模式下，备用站的全部数据（含登录凭据）都来自 KV。
+// KV 存储层：ESA「边缘存储（EdgeKV）」，只读镜像模式的数据来源。
 //
-// 数据由主站「主动推送」写入（POST /api/sync），备用站只读，绝不反向写。
-// 快照式存储：单人使用、数据量小，用少数几个 key 存整份快照，避免拆表带来的
-// 一致性问题（没有事务，拆得越碎越容易一半新一半旧）。
+// 数据由主站「主动推送」写入（POST /api/sync），备用站只读。
 //
-// KV 绑定：在 ESA 控制台把 KV 命名空间绑定到函数，变量名默认 IKUN_KV
-// （可用环境变量 IKUN_KV_BINDING 改名）。边缘函数里通过 env[绑定名] 访问。
-
+// ESA 官方 API（边缘存储 API）：
+//   const edgeKv = new EdgeKV({ namespace: "ns" });
+//   await edgeKv.get(key, { type: 'json' })   // 不存在返回 null
+//   await edgeKv.put(key, value)              // value 为 string，单条最大 1.8MB
+//   await edgeKv.delete(key)                  // 返回 true/false
+//
+// 注意：ESA 通过**环境变量**指定存储空间名（默认 EDGE_KV_NAMESPACE），
+// 而不是把 KV 句柄绑定进 env。EdgeKV 是运行时全局类。
+//
+// 单条 Value 上限 1.8MB，所以快照按分片存储：manifest 记录分片清单，
+// 每个分片一个 key，避免书签变多后超出单条限制。
 import { BizError } from './http.js';
 
-const SNAPSHOT_KEY = 'snapshot';
+const MANIFEST_KEY = 'ikun_manifest';
+const CHUNK_PREFIX = 'ikun_chunk_';
+// 单条上限 1.8MB，留出余量，按 1.5MB 分片
+const CHUNK_BYTES = 1_500_000;
 const SNAPSHOT_FORMAT = 1;
 
-/** 在运行时 env 中查找 KV 命名空间句柄 */
-export function getKV(cfg) {
+/** 取环境变量（ESA 函数变量） */
+function envValue(cfg, key, fallback = '') {
   const env = cfg?.env || {};
-  const name = cfg?.kvBinding || 'IKUN_KV';
-  const kv = env[name];
-  if (kv) return kv;
-  // 兜底：常见的几个默认绑定名
-  for (const fallback of ['IKUN_KV', 'KV', 'ikun_kv']) {
-    if (env[fallback]) return env[fallback];
+  if (env[key] !== undefined && env[key] !== null && String(env[key]).trim() !== '') {
+    return String(env[key]).trim();
   }
-  return null;
+  return fallback;
 }
 
-function requireKV(cfg) {
-  const kv = getKV(cfg);
-  if (!kv) {
-    throw new BizError('备用站未绑定 KV 存储：请在 ESA 控制台绑定 KV 命名空间（变量名 IKUN_KV）', 503);
+/** 存储空间名称：优先 IKUN_KV_NAMESPACE，其次 EDGE_KV_NAMESPACE */
+export function kvNamespace(cfg) {
+  return envValue(cfg, 'IKUN_KV_NAMESPACE') || envValue(cfg, 'EDGE_KV_NAMESPACE');
+}
+
+/**
+ * 创建 EdgeKV 实例。
+ * EdgeKV 是 ESA 运行时的全局类；本地 Node 环境没有，所以这里做兼容封装。
+ */
+export function getKV(cfg) {
+  const namespace = kvNamespace(cfg);
+  if (!namespace) {
+    throw new BizError(
+      '未配置存储空间名称：请在 ESA 控制台添加环境变量 IKUN_KV_NAMESPACE（或 EDGE_KV_NAMESPACE），' +
+        '值填你在「边缘计算 → 边缘存储」创建的空间名称',
+      503,
+    );
   }
-  return kv;
+
+  const Ctor = globalThis.EdgeKV;
+  if (typeof Ctor === 'function') {
+    try {
+      return new Ctor({ namespace });
+    } catch (err) {
+      throw new BizError(`创建 EdgeKV 实例失败（namespace=${namespace}）：${err?.message || err}`, 503);
+    }
+  }
+
+  // 本地开发：如果 cfg 里注入了 kvImpl（内存实现），就用它
+  if (cfg?.kvImpl) return cfg.kvImpl;
+
+  throw new BizError(
+    '当前运行时不支持 EdgeKV（未找到全局 EdgeKV 类）。' +
+      '若在 ESA 边缘函数上出现此错误，请确认平台已支持边缘存储；本地开发请用 dev-server',
+    503,
+  );
 }
 
 function normKVError(err) {
   const msg = String(err?.message || err || '');
   if (/timeout|timed out/i.test(msg)) return new BizError('KV 读取超时，请稍后重试', 503);
+  if (/namespace/i.test(msg)) return new BizError(`KV 存储空间不可用：${msg}`, 503);
   return new BizError(`KV 访问失败：${msg}`, 503);
 }
 
-async function kvGet(kv, key) {
+/** 读 raw 文本 */
+async function kvGetText(kv, key) {
   try {
-    let value = null;
-    if (typeof kv.get === 'function') {
-      value = await kv.get(key);
-    } else if (typeof kv.getJSON === 'function') {
-      value = await kv.getJSON(key);
-    } else if (typeof kv.read === 'function') {
-      value = await kv.read(key);
-    }
+    const value = await kv.get(key, { type: 'text' });
     if (value === undefined || value === null) return null;
-    // 有的实现直接返回对象，有的返回 JSON 字符串，两种都要兼容
-    if (typeof value === 'object') return value;
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (!trimmed) return null;
-      return JSON.parse(trimmed);
-    }
-    return null;
+    if (typeof value === 'string') return value;
+    // 兼容某些实现返回流/对象
+    if (typeof value === 'object' && typeof value.text === 'function') return await value.text();
+    return String(value);
   } catch (err) {
-    if (err instanceof BizError) throw err;
-    // JSON 解析失败也归类为 KV 异常
     throw normKVError(err);
   }
 }
 
-async function kvPut(kv, key, value) {
-  const serialized = JSON.stringify(value);
-  const errors = [];
-  // 不同平台的 KV 写入 API 名称不同，按可能性依次尝试，全部失败才报错。
-  const attempts = [
-    ['put', () => kv.put(key, serialized)],
-    ['put', () => kv.put(key, value)],
-    ['set', () => kv.set(key, serialized)],
-    ['putJSON', () => kv.putJSON(key, value)],
-    ['setJSON', () => kv.setJSON(key, value)],
-  ];
-  for (const [name, fn] of attempts) {
-    if (typeof kv[name] !== 'function') continue;
-    try {
-      await fn();
-      return;
-    } catch (err) {
-      errors.push(`${name}: ${err?.message || err}`);
-    }
+/** 写 raw 文本 */
+async function kvPutText(kv, key, text) {
+  try {
+    await kv.put(key, text);
+  } catch (err) {
+    throw normKVError(err);
   }
-  const detail = errors.length
-    ? `已尝试的写入方式均失败（${errors.join('; ')}）`
-    : `KV 句柄上没有任何可用的写入方法（实际类型：${typeof kv}）`;
-  throw normKVError(new Error(detail));
 }
 
-/** 读取整份快照；未同步过返回 null */
+async function kvDelete(kv, key) {
+  try {
+    if (typeof kv.delete === 'function') await kv.delete(key);
+  } catch {
+    /* 清理失败无所谓 */
+  }
+}
+
+/** EdgeKV 的 key 只允许字母、数字、- 和 _ */
+function safeKey(prefix, index) {
+  return `${prefix}${index}`.replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
+/**
+ * 读取整份快照（自动拼接分片）；未同步过返回 null。
+ */
 export async function readSnapshot(cfg) {
-  const kv = requireKV(cfg);
-  const raw = await kvGet(kv, SNAPSHOT_KEY);
-  if (!raw || typeof raw !== 'object') return null;
-  if (raw.format !== SNAPSHOT_FORMAT) {
-    // 格式不识别：当作空快照，避免用错结构渲染
+  const kv = getKV(cfg);
+
+  const manifestText = await kvGetText(kv, MANIFEST_KEY);
+  if (!manifestText) return null;
+
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestText);
+  } catch {
     return null;
   }
+  if (!manifest || manifest.format !== SNAPSHOT_FORMAT) return null;
+
+  const count = Number(manifest.chunks) || 0;
+  const parts = [];
+  for (let i = 0; i < count; i += 1) {
+    const text = await kvGetText(kv, safeKey(CHUNK_PREFIX, i));
+    if (text === null) {
+      // 分片缺失说明写入未完成或已被清理，按无数据处理，避免返回残缺快照
+      return null;
+    }
+    parts.push(text);
+  }
+
+  let data;
+  try {
+    data = JSON.parse(parts.join(''));
+  } catch {
+    return null;
+  }
+
   return {
-    updatedAt: Number(raw.updatedAt) || 0,
-    users: Array.isArray(raw.users) ? raw.users : [],
-    groups: Array.isArray(raw.groups) ? raw.groups : [],
-    bookmarks: Array.isArray(raw.bookmarks) ? raw.bookmarks : [],
-    settings: Array.isArray(raw.settings) ? raw.settings : [],
-    searchEngines: Array.isArray(raw.searchEngines) ? raw.searchEngines : [],
+    updatedAt: Number(manifest.updatedAt) || 0,
+    users: Array.isArray(data.users) ? data.users : [],
+    groups: Array.isArray(data.groups) ? data.groups : [],
+    bookmarks: Array.isArray(data.bookmarks) ? data.bookmarks : [],
+    settings: Array.isArray(data.settings) ? data.settings : [],
+    searchEngines: Array.isArray(data.searchEngines) ? data.searchEngines : [],
   };
 }
 
-/** 写入整份快照（仅 /api/sync 调用，主站推送） */
+/**
+ * 写入整份快照（分片）。
+ * 先写全部分片，最后写 manifest —— manifest 是提交点，
+ * 这样即使中途失败，读到的仍是上一份完整快照。
+ */
 export async function writeSnapshot(cfg, snapshot) {
-  const kv = requireKV(cfg);
+  const kv = getKV(cfg);
+
   const payload = {
-    format: SNAPSHOT_FORMAT,
-    updatedAt: Date.now(),
     users: snapshot.users,
     groups: snapshot.groups,
     bookmarks: snapshot.bookmarks,
     settings: snapshot.settings,
     searchEngines: snapshot.searchEngines,
   };
-  await kvPut(kv, SNAPSHOT_KEY, payload);
-  return payload.updatedAt;
+
+  const json = JSON.stringify(payload);
+
+  // 写入前先读旧 manifest，记下旧分片数，写入后清理多余分片
+  let prevChunks = 0;
+  try {
+    const oldText = await kvGetText(kv, MANIFEST_KEY);
+    if (oldText) prevChunks = Number(JSON.parse(oldText).chunks) || 0;
+  } catch {
+    prevChunks = 0;
+  }
+
+  // 按 UTF-8 字节切分，且不切断多字节字符
+  const chunks = [];
+  let offset = 0;
+  while (offset < json.length) {
+    let bytes = 0;
+    let end = offset;
+    while (end < json.length) {
+      const code = json.charCodeAt(end);
+      // UTF-8 字节数：ASCII=1，常见中日韩=3，代理对按 4 保守计入
+      let charBytes;
+      if (code < 0x80) charBytes = 1;
+      else if (code < 0x800) charBytes = 2;
+      else if (code >= 0xd800 && code <= 0xdbff) charBytes = 4;
+      else charBytes = 3;
+      if (bytes + charBytes > CHUNK_BYTES) break;
+      bytes += charBytes;
+      end += 1;
+    }
+    if (end === offset) end = offset + 1; // 兜底，避免死循环
+    chunks.push(json.slice(offset, end));
+    offset = end;
+  }
+
+  const updatedAt = Date.now();
+  for (let i = 0; i < chunks.length; i += 1) {
+    await kvPutText(kv, safeKey(CHUNK_PREFIX, i), chunks[i]);
+  }
+
+  const manifest = {
+    format: SNAPSHOT_FORMAT,
+    updatedAt,
+    chunks: chunks.length,
+    bytes: json.length,
+    counts: {
+      users: payload.users?.length || 0,
+      groups: payload.groups?.length || 0,
+      bookmarks: payload.bookmarks?.length || 0,
+      settings: payload.settings?.length || 0,
+      searchEngines: payload.searchEngines?.length || 0,
+    },
+  };
+  // manifest 是提交点：写完后旧快照即失效
+  await kvPutText(kv, MANIFEST_KEY, JSON.stringify(manifest));
+
+  // 清理旧快照遗留的多余分片（分片数变少时）
+  for (let i = chunks.length; i < prevChunks; i += 1) {
+    await kvDelete(kv, safeKey(CHUNK_PREFIX, i));
+  }
+
+  return { updatedAt, chunks: chunks.length, bytes: json.length };
 }
 
-/** 快照是否可用（已同步过） */
+/** 快照是否可用 */
 export async function snapshotReady(cfg) {
   const snap = await readSnapshot(cfg);
   return Boolean(snap && snap.updatedAt > 0);
 }
 
 /**
- * 诊断：返回 KV 绑定的真实形态，用于排查「KV 句柄不支持写入」这类问题。
- * 只读操作，不写入任何业务数据（会尝试一次写测试 key 来确认写能力）。
+ * 诊断：确认 EdgeKV 是否可用、namespace 配置是否正确。
  */
 export async function inspectKV(cfg) {
-  const env = cfg?.env || {};
-  const bindingName = cfg?.kvBinding || 'IKUN_KV';
-  const kv = getKV(cfg);
+  const namespace = kvNamespace(cfg);
+  const hasGlobal = typeof globalThis.EdgeKV === 'function';
 
   const info = {
-    bindingName,
-    found: Boolean(kv),
-    typeofValue: kv === null || kv === undefined ? 'undefined' : typeof kv,
-    // 列出对象上所有可枚举 + 原型链上的方法名
-    methods: [],
-    ownKeys: [],
-    protoKeys: [],
-    envKeysSample: Object.keys(env).slice(0, 60),
-    // 每个 env 值的类型，便于识别哪个才是真正的 KV 句柄
-    envTypes: Object.fromEntries(
-      Object.keys(env).slice(0, 60).map((k) => {
-        try {
-          const v = env[k];
-          return [k, v === null || v === undefined ? 'undefined' : typeof v];
-        } catch {
-          return [k, 'unreadable'];
-        }
-      }),
-    ),
-    globals: {
-      globalKV: typeof globalThis.kv,
-      globalKVNamespace: typeof globalThis.KV,
-      globalCaches: typeof globalThis.caches,
-    },
+    namespace,
+    namespaceFrom: envValue(cfg, 'IKUN_KV_NAMESPACE')
+      ? 'IKUN_KV_NAMESPACE'
+      : envValue(cfg, 'EDGE_KV_NAMESPACE')
+        ? 'EDGE_KV_NAMESPACE'
+        : '(未配置)',
+    hasGlobalEdgeKV: hasGlobal,
+    globalKeys: Object.keys(globalThis).filter((k) => /kv|kvstorage|edge/i.test(k)).slice(0, 20),
+    createTest: null,
     writeTest: null,
     readTest: null,
+    manifest: null,
   };
 
-  if (kv && typeof kv === 'object') {
-    try {
-      info.ownKeys = Object.keys(kv);
-    } catch {
-      /* ignore */
-    }
-    try {
-      const proto = Object.getPrototypeOf(kv);
-      info.protoKeys = proto ? Object.getOwnPropertyNames(proto) : [];
-    } catch {
-      /* ignore */
-    }
-    const seen = new Set();
-    for (const key of [...info.ownKeys, ...info.protoKeys]) {
-      try {
-        if (typeof kv[key] === 'function') seen.add(key);
-      } catch {
-        /* ignore */
-      }
-    }
-    info.methods = [...seen].sort();
+  if (!namespace) {
+    info.createTest = { ok: false, error: '未配置命名空间环境变量' };
+    return info;
+  }
+  if (!hasGlobal && !cfg?.kvImpl) {
+    info.createTest = { ok: false, error: '运行时没有全局 EdgeKV 类' };
+    return info;
   }
 
-  // 尝试写入一个测试 key，确认写能力与具体 API 形式
-  if (kv) {
-    const testKey = `__kv_probe_${Date.now()}`;
-    const testValue = 'ok';
-    const attempts = [];
-    const tryCall = async (label, fn) => {
-      try {
-        await fn();
-        attempts.push({ api: label, ok: true });
-        return true;
-      } catch (err) {
-        attempts.push({ api: label, ok: false, error: String(err?.message || err) });
-        return false;
-      }
-    };
+  let kv;
+  try {
+    kv = getKV(cfg);
+    info.createTest = { ok: true };
+  } catch (err) {
+    info.createTest = { ok: false, error: String(err?.message || err) };
+    return info;
+  }
 
-    if (typeof kv.put === 'function') {
-      await tryCall('put(key, string)', () => kv.put(testKey, testValue));
-    }
-    if (typeof kv.set === 'function') {
-      await tryCall('set(key, string)', () => kv.set(testKey, testValue));
-    }
-    if (typeof kv.putJSON === 'function') {
-      await tryCall('putJSON(key, obj)', () => kv.putJSON(testKey, { v: 1 }));
-    }
+  const probeKey = `ikun_probe_${Date.now()}`;
+  const probeValue = `ok-${Date.now()}`;
+  try {
+    await kv.put(probeKey, probeValue);
+    info.writeTest = { ok: true };
+  } catch (err) {
+    info.writeTest = { ok: false, error: String(err?.message || err) };
+  }
+  try {
+    const back = await kv.get(probeKey, { type: 'text' });
+    info.readTest = { ok: back === probeValue, value: back === null ? null : String(back).slice(0, 60) };
+  } catch (err) {
+    info.readTest = { ok: false, error: String(err?.message || err) };
+  }
+  await kvDelete(kv, probeKey);
 
-    // 读回
-    try {
-      let v = null;
-      if (typeof kv.get === 'function') v = await kv.get(testKey, { type: 'text' });
-      else if (typeof kv.getJSON === 'function') v = await kv.getJSON(testKey);
-      info.readTest = { ok: true, value: typeof v === 'object' ? v : String(v) };
-    } catch (err) {
-      info.readTest = { ok: false, error: String(err?.message || err) };
-    }
-    info.writeTest = attempts;
+  try {
+    const m = await kvGetText(kv, MANIFEST_KEY);
+    info.manifest = m ? JSON.parse(m) : null;
+  } catch (err) {
+    info.manifest = { error: String(err?.message || err) };
   }
 
   return info;

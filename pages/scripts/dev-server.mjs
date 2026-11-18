@@ -35,19 +35,29 @@ function loadEnvFile() {
 
 loadEnvFile();
 
-// 本地内存版 KV：模拟 ESA 绑定的 KV 命名空间（仅进程内，重启即清空）。
-// 真实的 ESA KV 会在 env 里以绑定名的形式出现，本地用同名对象顶上。
+// 本地内存版 EdgeKV：模拟 ESA 的边缘存储（仅进程内，重启即清空）。
+// ESA 上是全局类 EdgeKV，本地用功能等价的实现顶上（通过 kvImpl 注入）。
 function createMemoryKV() {
   const store = new Map();
   return {
-    async get(key) {
-      return store.has(key) ? store.get(key) : null;
+    async get(key, opts = {}) {
+      if (!store.has(key)) return null;
+      const v = store.get(key);
+      if (opts && opts.type === 'json') {
+        try {
+          return JSON.parse(v);
+        } catch {
+          return null;
+        }
+      }
+      return v;
     },
     async put(key, value) {
       store.set(key, String(value));
     },
     async delete(key) {
       store.delete(key);
+      return true;
     },
   };
 }
@@ -139,10 +149,12 @@ const server = createServer(async (req, res) => {
       }
     }
     const request = await toRequest(req);
-    // 本地把内存 KV 以绑定名注入 env，让镜像模式可直接跑通
-    const bindingName = process.env.IKUN_KV_BINDING || 'IKUN_KV';
-    const runtimeEnv = { ...process.env, [bindingName]: memoryKV };
-    const response = await handler.fetch(request, {}, runtimeEnv);
+    // 本地没有全局 EdgeKV：注入内存实现，并给一个默认命名空间
+    const runtimeEnv = { ...process.env };
+    if (!runtimeEnv.IKUN_KV_NAMESPACE && !runtimeEnv.EDGE_KV_NAMESPACE) {
+      runtimeEnv.IKUN_KV_NAMESPACE = 'local-dev';
+    }
+    const response = await handler.fetch(request, {}, runtimeEnv, { kvImpl: memoryKV });
     await writeResponse(res, response);
   } catch (err) {
     console.error('[dev]', err);

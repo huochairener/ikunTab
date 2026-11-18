@@ -70,10 +70,12 @@ export async function sync(ctx) {
   assertAuthorized(ctx);
   const body = await readJson(ctx);
   const snapshot = validate(body);
-  const updatedAt = await writeSnapshot(ctx.cfg, snapshot);
+  const result = await writeSnapshot(ctx.cfg, snapshot);
   return json(
     ok({
-      updatedAt,
+      updatedAt: result.updatedAt,
+      chunks: result.chunks,
+      bytes: result.bytes,
       counts: {
         users: snapshot.users.length,
         groups: snapshot.groups.length,

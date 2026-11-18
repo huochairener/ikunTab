@@ -32,16 +32,16 @@ function createMemoryKV() {
 }
 
 const kv = createMemoryKV();
-const kvBinding = 'IKUN_KV';
 const env = {
   IKUN_DATA_SOURCE: 'mirror',
-  IKUN_KV_BINDING: kvBinding,
+  IKUN_KV_NAMESPACE: 'test-namespace',
   IKUN_SYNC_SECRET: SYNC_SECRET,
   IKUN_JWT_SECRET: 'test-jwt-secret-for-mirror',
-  [kvBinding]: kv,
 };
 
 const cfg = createConfig(env);
+// 本地没有全局 EdgeKV，注入内存实现
+cfg.kvImpl = kv;
 
 let pass = 0;
 let fail = 0;
@@ -258,6 +258,69 @@ for (const [method, path, body] of writes) {
   check('登出成功', r.json?.code === 0, JSON.stringify(r.json));
   const after = await call('GET', '/api/auth/me');
   check('登出后 me 为 null', after.json?.data === null, JSON.stringify(after.json));
+}
+
+// ---- 9) 分片存储（单条 1.8MB 上限时必须自动分片）----
+{
+  const { writeSnapshot, readSnapshot } = await import('../src/kv.js');
+  const big = [];
+  for (let i = 0; i < 12000; i += 1) {
+    big.push({
+      id: i,
+      userId: 7,
+      groupId: 70,
+      parentId: null,
+      type: 0,
+      name: '书签名称' + i,
+      url: 'https://example.com/path/' + i + '?q=测试',
+      iconType: 'favicon',
+      iconValue: null,
+      sortOrder: i,
+    });
+  }
+  const res = await writeSnapshot(cfg, {
+    users: [],
+    groups: [],
+    bookmarks: big,
+    settings: [],
+    searchEngines: [],
+  });
+  check('大快照自动分片（>1 片）', res.chunks > 1, JSON.stringify(res));
+  check('总字节数超过 1.8MB（确实需要分片）', res.bytes > 1_800_000, String(res.bytes));
+  // 每个分片都必须小于 ESA 单条上限 1.8MB
+  const { kvNamespace } = await import('../src/kv.js');
+  const chunkSizes = [];
+  for (let i = 0; i < res.chunks; i += 1) {
+    const v = await kv.get('ikun_chunk_' + i);
+    chunkSizes.push(String(v).length);
+  }
+  check(
+    '每片均小于 1.8MB 上限',
+    chunkSizes.every((n) => n < 1_800_000),
+    JSON.stringify(chunkSizes),
+  );
+
+  const back = await readSnapshot(cfg);
+  check('分片读回完整', back && back.bookmarks.length === big.length, String(back?.bookmarks?.length));
+  check(
+    '分片不破坏中文',
+    back?.bookmarks?.[5000]?.name === '书签名称5000',
+    String(back?.bookmarks?.[5000]?.name),
+  );
+
+  // 写回小快照，旧分片应被清理
+  await writeSnapshot(cfg, {
+    users: [],
+    groups: [],
+    bookmarks: big.slice(0, 5),
+    settings: [],
+    searchEngines: [],
+  });
+  const back2 = await readSnapshot(cfg);
+  check('缩小后读回正确（旧分片已清理）', back2 && back2.bookmarks.length === 5, String(back2?.bookmarks?.length));
+
+  // 恢复原快照，避免影响后续断言
+  await writeSnapshot(cfg, snapshot);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

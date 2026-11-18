@@ -15,8 +15,9 @@ const DEFAULTS = {
   IKUN_DATA_SOURCE: 'mirror',
   IKUN_API_ORIGIN: '',
 
-  // KV 只读镜像：控制台绑定的 KV 命名空间变量名 + 主站推送用的共享密钥
-  IKUN_KV_BINDING: 'IKUN_KV',
+  // KV 只读镜像：ESA 通过环境变量指定存储空间名（不是绑定句柄）
+  IKUN_KV_NAMESPACE: '',
+  EDGE_KV_NAMESPACE: '',
   IKUN_SYNC_SECRET: '',
 
   IKUN_MYSQL_HOST: '',
@@ -86,9 +87,8 @@ export function createConfig(runtimeEnv = {}) {
     dataSource,
     apiOrigin,
     mysql,
-    // 边缘函数原始 env（KV 句柄在这里面）
+    // 边缘函数原始 env（读取存储空间名等）
     env: runtimeEnv || {},
-    kvBinding: get('IKUN_KV_BINDING') || 'IKUN_KV',
     syncSecret: get('IKUN_SYNC_SECRET'),
     jwtSecret: get('IKUN_JWT_SECRET'),
     jwtCookieName: get('IKUN_JWT_COOKIE_NAME') || 'ikun_token',

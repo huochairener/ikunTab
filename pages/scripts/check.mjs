@@ -100,8 +100,7 @@ async function main() {
       '默认配置可用',
       cfg.dataSource === 'mirror' &&
         cfg.jwtCookieName === 'ikun_token' &&
-        cfg.jwtExpireMinutes > 0 &&
-        cfg.kvBinding === 'IKUN_KV',
+        cfg.jwtExpireMinutes > 0,
     );
   }
 

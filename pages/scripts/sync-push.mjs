@@ -223,8 +223,10 @@ export async function main({ dryRun = false } = {}) {
   }
 }
 
-// 仅当作为脚本直接执行时才跑 main；被 import（测试/复用）时不自动执行
-const entry = process.argv[1] || '';
+// 仅当作为脚本直接执行时才跑 main；被 import（测试/复用）时不自动执行。
+// 用 typeof 探测 process，因为本文件也可能在无 process 的运行时被 import。
+const hasProcess = typeof process !== 'undefined';
+const entry = (hasProcess && process.argv?.[1]) || '';
 const isDirectRun = Boolean(entry) && entry.replace(/\\/g, '/').endsWith('scripts/sync-push.mjs');
 if (isDirectRun) {
   main().catch((err) => {

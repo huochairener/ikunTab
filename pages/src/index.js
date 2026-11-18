@@ -6,8 +6,10 @@ import { createConfig } from './config.js';
 import { handleRequest } from './app.js';
 
 export default {
-  async fetch(request, context, env) {
+  async fetch(request, context, env, options) {
     const cfg = createConfig(env || {});
+    // 本地开发用：把内存版 KV 实现注入（ESA 上不存在此参数）
+    if (options && options.kvImpl) cfg.kvImpl = options.kvImpl;
     return handleRequest(request, cfg);
   },
 };

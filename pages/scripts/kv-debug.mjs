@@ -51,26 +51,23 @@ if (!resp.ok || !body || body.code !== 0) {
 }
 
 const info = body.data;
-console.log('=== KV 绑定诊断 ===');
-console.log(`绑定名        : ${info.bindingName}`);
-console.log(`是否找到      : ${info.found}`);
-console.log(`值的类型      : ${info.typeofValue}`);
-console.log(`可用方法      : ${info.methods?.length ? info.methods.join(', ') : '(无)'}`);
-console.log(`自有属性      : ${info.ownKeys?.length ? info.ownKeys.join(', ') : '(无)'}`);
-console.log(`原型方法      : ${info.protoKeys?.length ? info.protoKeys.join(', ') : '(无)'}`);
+console.log('=== ESA 边缘存储（EdgeKV）诊断 ===');
+console.log('存储空间名称  : ' + (info.namespace || '(未配置)'));
+console.log('取自环境变量  : ' + info.namespaceFrom);
+console.log('全局 EdgeKV 类: ' + (info.hasGlobalEdgeKV ? '可用' : '不可用'));
+console.log('全局相关对象  : ' + JSON.stringify(info.globalKeys));
 console.log('');
-console.log('写入测试:');
-for (const t of info.writeTest || []) {
-  console.log(`  ${t.ok ? '✅' : '❌'} ${t.api}${t.error ? ' — ' + t.error : ''}`);
+console.log('创建实例      : ' + JSON.stringify(info.createTest));
+console.log('写入测试      : ' + JSON.stringify(info.writeTest));
+console.log('读回测试      : ' + JSON.stringify(info.readTest));
+console.log('');
+console.log('现有快照清单  : ' + JSON.stringify(info.manifest, null, 2));
+console.log('');
+if (info.writeTest?.ok && info.readTest?.ok) {
+  console.log('✅ EdgeKV 工作正常，可以执行 npm run push');
+} else {
+  console.log('❌ EdgeKV 不可用，请检查：');
+  console.log('   1. ESA 控制台「边缘计算 → 边缘存储」是否已创建存储空间');
+  console.log('   2. 函数变量里 IKUN_KV_NAMESPACE 是否等于该空间名称（区分大小写）');
+  console.log('   3. 修改环境变量后是否重新部署');
 }
-console.log('');
-console.log('读回测试:', JSON.stringify(info.readTest));
-console.log('');
-console.log('env 中可见的键及其类型（前 60 个）:');
-const types = info.envTypes || {};
-for (const k of info.envKeysSample || []) {
-  const t = types[k] || '?';
-  console.log(`  ${k}: ${t}`);
-}
-console.log('');
-console.log('全局对象:', JSON.stringify(info.globals));
