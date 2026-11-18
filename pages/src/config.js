@@ -3,16 +3,21 @@
 // 这样两个站可以复用同一份配置。
 //
 // 数据来源（IKUN_DATA_SOURCE）：
-//   auto   默认。配了 MySQL 就直连数据库；没配 MySQL 或数据库不可用时回退到主站代理
+//   mirror 默认。只读镜像：数据来自 KV 快照（由主站主动推送），主站宕机时备用站照常可用
+//   auto   配了 MySQL 就直连；没配或数据库不可用时回退到主站代理
 //   direct 只用 MySQL
-//   proxy  只用主站代理（IKUN_API_ORIGIN）
+//   proxy  只用主站代理（IKUN_API_ORIGIN）——主站宕机时备用站不可用
 
 // 避免直接书写 pass-word 属性名，这里用计算属性构造 mysql2 配置
 const PASS_KEY = 'pas' + 'sword';
 
 const DEFAULTS = {
-  IKUN_DATA_SOURCE: 'auto',
+  IKUN_DATA_SOURCE: 'mirror',
   IKUN_API_ORIGIN: '',
+
+  // KV 只读镜像：控制台绑定的 KV 命名空间变量名 + 主站推送用的共享密钥
+  IKUN_KV_BINDING: 'IKUN_KV',
+  IKUN_SYNC_SECRET: '',
 
   IKUN_MYSQL_HOST: '',
   IKUN_MYSQL_PORT: '',
@@ -62,8 +67,8 @@ export function createConfig(runtimeEnv = {}) {
   const nodeEnv = typeof process !== 'undefined' && process?.env ? process.env : {};
   const get = (key) => firstDefined(runtimeEnv?.[key], nodeEnv?.[key], DEFAULTS[key]);
 
-  const source = (get('IKUN_DATA_SOURCE') || 'auto').toLowerCase();
-  const dataSource = ['auto', 'direct', 'proxy'].includes(source) ? source : 'auto';
+  const source = (get('IKUN_DATA_SOURCE') || 'mirror').toLowerCase();
+  const dataSource = ['mirror', 'auto', 'direct', 'proxy'].includes(source) ? source : 'mirror';
 
   const mysql = {
     host: get('IKUN_MYSQL_HOST').trim(),
@@ -81,6 +86,10 @@ export function createConfig(runtimeEnv = {}) {
     dataSource,
     apiOrigin,
     mysql,
+    // 边缘函数原始 env（KV 句柄在这里面）
+    env: runtimeEnv || {},
+    kvBinding: get('IKUN_KV_BINDING') || 'IKUN_KV',
+    syncSecret: get('IKUN_SYNC_SECRET'),
     jwtSecret: get('IKUN_JWT_SECRET'),
     jwtCookieName: get('IKUN_JWT_COOKIE_NAME') || 'ikun_token',
     jwtExpireMinutes: toInt(get('IKUN_JWT_EXPIRE_MINUTES'), 43200),

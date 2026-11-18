@@ -11,7 +11,9 @@
     "build": "node scripts/build.mjs",
     "dev": "node scripts/dev-server.mjs",
     "check": "node scripts/check.mjs",
-    "deploy": "esa-cli deploy"
+    "deploy": "esa-cli deploy",
+    "test:mirror": "node scripts/mirror-test.mjs",
+    "sync": "node scripts/sync-push.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

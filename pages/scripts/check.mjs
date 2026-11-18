@@ -96,7 +96,13 @@ async function main() {
   {
     const { createConfig } = await import('../src/config.js');
     const cfg = createConfig({});
-    check('默认配置可用', cfg.dataSource === 'auto' && cfg.jwtCookieName === 'ikun_token' && cfg.jwtExpireMinutes > 0);
+    check(
+      '默认配置可用',
+      cfg.dataSource === 'mirror' &&
+        cfg.jwtCookieName === 'ikun_token' &&
+        cfg.jwtExpireMinutes > 0 &&
+        cfg.kvBinding === 'IKUN_KV',
+    );
   }
 
   // 7) 代理模式未配置主站地址：应返回明确的 503 配置错误，而不是 500

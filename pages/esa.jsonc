@@ -2,7 +2,11 @@
   // ESA 函数和Pages 配置（GitHub 导入时生效；CLI 部署时 entry/assets 生效）
   // 控制台创建 Pages 时：根目录填 /pages，其余项留空由本文件覆盖。
   "name": "ikun-tab-pages",
-  "description": "ikun-tab 备用站：静态前端 + /api 后端（与 Python 主站共用 MySQL）",
+  "description": "ikun-tab 备用站：静态前端 + KV 只读镜像（主站宕机仍可登录并浏览书签）",
+
+  // KV 绑定：本文件不声明（不同 ESA 版本字段名不一致，写错会导致部署失败）。
+  // 请在 ESA 控制台 → 项目 → 基本信息 → 函数变量/绑定 中
+  // 把 KV 命名空间绑定到函数，变量名填 IKUN_KV（与 IKUN_KV_BINDING 一致）。
 
   // 函数入口：同时承载 Pages 的边缘函数与 Node 运行时
   "entry": "./src/index.js",

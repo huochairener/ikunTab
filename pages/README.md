@@ -1,106 +1,124 @@
 # ikun-tab 备用站（ESA 函数和 Pages）
 
-主站（Docker + FastAPI + MySQL）的备用站点，部署到阿里云 **ESA（边缘安全加速）的「函数和 Pages」** 上：
+主站（Docker + FastAPI + MySQL）的**容灾备用站**，部署到阿里云 **ESA（边缘安全加速）的「函数和Pages」**。
 
-- **前端**：复用仓库 `frontend/` 的 Vue SPA 源码，构建产物静态托管在 ESA 边缘节点（`esa.jsonc` 已配置 SPA 路由兜底）。
-- **后端**：`src/` 下用 Web 标准 API 重写了 Python 主站的全部接口（同一批 `tab_*` 表、同一套 `R<T>` 响应格式、同一套 JWT Cookie 登录态），并支持把 `/api/*` 请求转发给 Python 主站。
-- **登录才能使用**：与主站一致的 JWT httpOnly Cookie + `pwd_version` 校验，未登录接口返回 `code=401`，前端自动跳登录页。
+> **目标**：主站整机宕机时，仍能通过备用站**登录**并**找回目的书签**。
 
-## 两种数据来源（重点，先读这段）
-
-ESA 边缘函数是 **V8 Isolate 运行时，没有 TCP 能力**（官方 API 只有 fetch / KV / Cache 等，无 `net`/`tls`），所以 **在 ESA 上无法用 mysql2 直连你的 MySQL**。代码里因此设计了两种模式，由 `IKUN_DATA_SOURCE` 控制：
-
-| 模式 | 取值 | 说明 | 适用环境 |
-|------|------|------|----------|
-| 转发主站 | `proxy` | `/api/*` 原样转发给 Python 主站，由主站读写数据库、校验登录 | **ESA 边缘函数（推荐）** |
-| 直连数据库 | `direct` | 备用站自己用 mysql2 读写 MySQL、自己签发/校验 JWT | 任何标准 Node.js 运行时（本地 dev-server、自建 Node 主机等） |
-| 自动 | `auto`（默认） | 配了 MySQL 就直连；没配、或当前运行时加载不了 mysql2（边缘函数）、或数据库连不上时，自动转发主站 | 两种都覆盖 |
-
-> **ESA 部署的实际效果**：边缘函数上 mysql2 加载失败 → 自动落到 proxy 模式。当“用户 → 主站”的网络路径不稳而“用户 → ESA → 主站”的路径正常时，备用站可用；**主站整机宕机时 ESA 上的备用站也无法出数据**（边缘节点连不到你的 MySQL）。若需要“主站宕机也能用”，需把同一份 `src/` 代码跑在支持 TCP 的 Node 运行时上（本目录 `npm run dev` 即是；或云函数/函数计算类产品），配置 `IKUN_MYSQL_*` 直连数据库即可。
-
-直连与转发模式 **共用同一个数据库、同一套表结构**，登录态互通（见下方 JWT 配置）。
-
-## 目录结构
+## 架构：KV 只读镜像（默认）
 
 ```
-pages/
-├── esa.jsonc              # ESA Pages 配置（入口 / 静态资源目录 / SPA 兜底 / 构建命令）
-├── package.json           # mysql2 + bcryptjs（均为纯 JS，Node 与边缘函数都能带）
-├── .env.example           # 环境变量样例（本地开发用）
-├── src/                   # 后端（Web 标准 API，无框架依赖）
-│   ├── index.js           # 入口：export default { fetch(request, context, env) }
-│   ├── app.js             # 请求分发：代理 / 直连 / 异常兜底
-│   ├── config.js          # 环境变量（IKUN_ 前缀，与 Python 主站同名同义）
-│   ├── db.js              # mysql2 连接池（动态加载；边缘函数上加载失败自动转代理）
-│   ├── jwt.js             # HS256 JWT，与 Python PyJWT 完全互通（sub/iat/exp/pv）
-│   ├── password.js        # bcryptjs，哈希与 Python passlib(bcrypt) 完全兼容
-│   ├── upstream.js         # 主站转发（/api/*、/uploads/*）
-│   └── routes/            # auth / bookmarks / groups / widgets / settings / search-engines / proxy / upload
-├── scripts/
-│   ├── build.mjs          # ESA 构建命令：构建 ../frontend 并输出到 pages/dist
-│   ├── dev-server.mjs     # 本地开发服务器（静态 + API 同源，读 .env）
-│   ├── check.mjs          # 冒烟测试（无需数据库）
-│   ├── integration-test.mjs # 端到端集成测试（需要真实 MySQL 测试库）
-│   └── schema.sql         # 表结构（与 backend-py/app/models 完全一致；主站已建表则无需执行）
-└── dist/                  # 构建产物（git 忽略，ESA 构建时生成）
+主站 MySQL ──(定时全量推送 /api/sync)──> ESA KV 快照 ──> 备用站边缘函数 ──> 浏览器
+                                              (只读)
 ```
 
-## 部署到 ESA（GitHub 导入方式）
+- **只读**：备用站不能新增/修改/删除任何书签、分组、设置；写操作统一返回 `403`。
+- **单向**：数据只从主站流向备用站，绝不反向。
+- **主站宕机仍可用**：备用站的数据来自 KV，不依赖主站存活。
+- **不实现挂件**：`GET /api/widgets` 返回空数组。
 
-1. **推送到 GitHub**：整个 `ikun-tab` 仓库（含本目录）推到你的 GitHub 仓库。
-2. **ESA 控制台** → 边缘计算和 AI → 函数和Pages → 创建 → **导入 GitHub 仓库**：
-   - **根目录**：填 `/pages`
-   - 构建命令 / 安装命令 / 静态资源目录 / 函数入口：**留空**，由仓库里的 `pages/esa.jsonc` 自动接管（`esa.jsonc` 优先级高于控制台配置）。
-3. **配置函数变量**（项目详情 → 基本信息 → 函数变量，生产环境）：
+## 为什么必须用 KV（不能直连 MySQL、也不能代理）
 
-   | 变量 | 必填 | 值 |
-   |------|------|------|
-   | `IKUN_API_ORIGIN` | ✅ | Python 主站完整地址（如 `https://ikun.example.com`），结尾不带 `/` |
-   | `IKUN_JWT_SECRET` | 建议 | 与主站一致的 JWT 密钥（docker-compose 部署时取其 `JWT_SECRET` 环境变量值）。ESA 纯代理模式下可以不配；一旦涉及直连模式（auto/direct），必须一致，否则主站签发的登录态在备用站无效 |
-   | `IKUN_HOTLIST_API_URL` | 可选 | 热榜聚合服务地址（与主站一致） |
-   | `IKUN_UPLOAD_ORIGIN` | 可选 | 上传回源地址，默认同 `IKUN_API_ORIGIN` |
+| 方案 | 主站宕机时 | 可行性 |
+|------|-----------|--------|
+| 边缘函数 + MySQL 直连 | 可用 | ❌ **物理不可能**：ESA 边缘是 V8 Isolate，无 TCP，`mysql2` 加载失败 |
+| 边缘函数 + 代理主站 | ❌ 全站不可用 | 能跑，但本质上只是「换个入口访问主站」，没有任何容灾价值 |
+| 边缘函数 + **KV 快照** | ✅ 可用 | ✅ 唯一满足目标且能留在 ESA 的方案 |
 
-4. **域名**：ESA 会分配一个 `*.esa.aliyun.com` 的临时预览域名（有效期 60 分钟，仅供验证）。长期使用请绑定自定义域名（需该域名已接入 ESA 并激活）。也可以先直接用分配域名访问验证功能。
+## 登录为什么用轻量哈希（重要）
 
-> 也可以用 CLI 部署：`npm i -g esa-cli && esa-cli login && cd pages && esa-cli deploy`（CLI 部署时 `esa.jsonc` 的 `entry`/`assets` 生效，`installCommand`/`buildCommand` 仅控制台导入时使用，本地先 `npm run build` 生成 `dist/`）。
+ESA 边缘函数 **CPU 配额只有 100ms/次**。bcrypt（rounds=10）一次要数百 ms，在边缘上必然超配额——所以备用站**不能**用主站的 bcrypt 哈希校验密码。
 
-## 本地开发
+解决方案：备用站用 `sha256(salt + ":" + 明文密码)` 校验，Web Crypto 原生实现，微秒级。
+
+代价与权衡（已知并接受）：
+- `sha256+盐` 抗离线暴力破解弱于 bcrypt。该站**单人使用**，且仅用于主站宕机时的降级登录，风险可接受。
+- **bcrypt 哈希无法逆推明文**，所以同步脚本必须提供一次明文密码（`IKUN_MIRROR_PASSWORD`）才能算出备用站的哈希。盐由 `IKUN_SYNC_SECRET` 稳定派生，不需额外存储。
+- JWT 仍用 `IKUN_JWT_SECRET` 签发（HS256），与主站同一密钥时登录态互通。
+
+## 部署步骤
+
+### 1. 构建与部署
+
+推送到 Git 仓库后，在 ESA 控制台导入，**根目录填 `/pages`**，其余留空（由 `esa.jsonc` 接管）。
+
+### 2. 控制台创建 KV 命名空间并绑定
+
+ESA 控制台 → 项目 → 基本信息 → **函数变量 / 绑定**：
+
+| 类型 | 变量名 | 值 |
+|------|--------|-----|
+| **KV 绑定** | `IKUN_KV` | 选择你创建的 KV 命名空间 |
+| 变量 | `IKUN_SYNC_SECRET` | 随机长字符串（与推送脚本一致） |
+| 变量 | `IKUN_JWT_SECRET` | 与主站 `JWT_SECRET` 一致（登录态互通） |
+| 变量 | `IKUN_API_ORIGIN` | 主站地址，仅用于 `/uploads/*` 背景图回源 |
+
+> `IKUN_DATA_SOURCE` 默认就是 `mirror`，可不配。
+
+### 3. 首次推送数据
+
+在主站机器（或任意能连到主站 MySQL 的机器）执行：
 
 ```bash
 cd pages
-cp .env.example .env        # 按需填写
 npm install
-npm run dev                 # http://127.0.0.1:18080（静态 + API 同源）
+IKUN_MYSQL_HOST=127.0.0.1 \
+IKUN_MYSQL_USER=root \
+IKUN_MYSQL_PASSWORD=你的数据库密码 \
+IKUN_MYSQL_DB=ikuntab \
+IKUN_SYNC_URL=https://ikuntab.glare.work \
+IKUN_SYNC_SECRET=与ESA函数变量一致 \
+IKUN_MIRROR_USERNAME=zmq \
+IKUN_MIRROR_PASSWORD=你的登录密码 \
+node scripts/sync-push.mjs
 ```
 
-- 本地默认同源部署，无需 CORS 配置。
-- `IKUN_DATA_SOURCE=direct` + `IKUN_MYSQL_*` 指向本地/远程 MySQL 时，走与主站相同的直连逻辑（同一数据库，登录态与主站互通，前提是 `IKUN_JWT_SECRET` 与主站一致）。
+成功会返回各表同步条数。
 
-## 测试
+### 4. 设置定时同步（推荐每小时）
+
+```cron
+0 * * * * cd /path/to/ikun-tab/pages && /usr/bin/node scripts/sync-push.mjs >> /var/log/ikun-sync.log 2>&1
+```
+
+（把上面那串 `IKUN_*` 环境变量写进 `.env` 或 shell 脚本里。）
+
+## 接口清单（镜像模式）
+
+| 方法 | 路径 | 行为 |
+|------|------|------|
+| POST | `/api/sync` | 主站推送（共享密钥鉴权），全量覆盖 KV 快照 |
+| POST | `/api/auth/login` | 用 KV 里的轻量哈希校验，签发 JWT Cookie |
+| GET | `/api/auth/me` | 当前用户 |
+| POST | `/api/auth/logout` | 清 Cookie |
+| GET | `/api/groups` | 读分组 |
+| GET | `/api/bookmarks?groupId=N` | 读书签 |
+| GET | `/api/settings` | 读设置 |
+| GET | `/api/search-engines` | 读搜索引擎 |
+| GET | `/api/widgets` | 固定返回 `[]`（备用站不实现挂件） |
+| GET | `/api/favicon` `/api/weather` `/api/hotlist` | 无状态第三方代理，照常可用 |
+| **其他写操作** | `/api/**` (POST/PUT/DELETE) | 统一 `403 备用站为只读镜像，请到主站操作` |
+
+## 本地开发与测试
 
 ```bash
-npm run check              # 冒烟测试（无需数据库）：路由 / JWT / 鉴权 / 404 / favicon / 代理模式配置校验
-
-# 端到端集成测试（真实 MySQL，务必指向测试库！）
-mysql -h 127.0.0.1 -u root -p -e "CREATE DATABASE ikuntab_pages_test DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-mysql -h 127.0.0.1 -u root -p ikuntab_pages_test < scripts/schema.sql
-IKUN_MYSQL_HOST=127.0.0.1 IKUN_MYSQL_USER=root IKUN_MYSQL_PASSWORD=*** IKUN_MYSQL_DB=ikuntab_pages_test \
-  node scripts/integration-test.mjs
+cd pages
+npm install
+npm run test:mirror   # 镜像模式端到端测试（内存 KV，无需 MySQL/ESA）：39 项
+npm run check         # 冒烟测试：11 项
+npm run dev           # http://127.0.0.1:18080（dev-server 内置内存 KV）
 ```
 
-集成测试覆盖：注册/登录/改密（含 `pwd_version` 使旧 token 失效）/分组/书签（含文件夹级联删除、移动排序）/小组件（`rows` 保留字）/设置（透明度夹取）/搜索引擎（默认引擎唯一）/越权访问 404 等 40 项。
+## 其它模式（排障用，非容灾）
 
-## 与 Python 主站的一致性说明
+`IKUN_DATA_SOURCE` 还可取 `auto` / `direct` / `proxy`：
 
-- **表结构**：`scripts/schema.sql` 与 `backend-py/app/models/*.py` 逐列一致（主站已建表则无需执行）。
-- **响应格式**：`{ code, msg, data }`，`code=0` 成功；业务错误 HTTP 200 + 非 0 `code`；未登录 `code=401` —— 前端拦截器行为完全一致。
-- **JWT**：`HS256`，payload `{ sub: 用户id, iat, exp, pv: 密码版本号 }`，与 Python `PyJWT` 互通（同密钥时 token 互相可验）。
-- **密码**：bcrypt `$2b$` 哈希，与 Python `passlib(bcrypt)` 互通（互相能验对方创建的账号）。
-- **接口路径/参数/校验**：与 `backend-py/app/routers` 逐一对应（如 `/api/bookmarks/move`、`parentId=0` 移出文件夹、文件夹删除级联子项、新组件追加到栅格末尾等行为均保持一致）。
-- **上传**：ESA 边缘没有持久磁盘，`/api/upload` 与 `/uploads/*` 一律转发主站（`IKUN_UPLOAD_ORIGIN`，默认 `IKUN_API_ORIGIN`）。
+- `auto`：配了 MySQL 就直连，否则回退代理
+- `direct`：只用 MySQL（需要支持 TCP 的 Node 运行时，非 ESA 边缘）
+- `proxy`：只用主站代理——**主站宕机即不可用**，仅用于临时排障
 
-## 已知差异 / 限制
+## 已知限制
 
-- ESA 边缘函数 CPU 时间配额约 100ms/次：代理模式不受影响（登录等重活都在主站完成）；**直连模式含 bcrypt 哈希（注册/登录/改密）在边缘函数上既无 TCP 也会超 CPU，所以直连模式只面向 Node 运行时**。
-- ESA 免费版边缘函数单次执行最多 4 个子请求：本项目每请求最多 1~2 个 fetch，满足限制。
-- Python 端对非法参数（长度越界等）由 pydantic 返回 422，本端返回 `code=400` 的 `R<T>`；前端两种都按“请求失败”处理，无实际影响。
+- ESA 边缘函数 CPU 配额 ~100ms、单请求最多 4 个子请求：镜像模式每请求只读 1 次 KV，完全满足。
+- `/uploads/*`（背景图/头像）仍回源主站，主站宕机时返回 404。
+- KV 快照是**全量覆盖**写入：数据量小（单人使用，几十条书签）时最简单且不会半新半旧。
+- 主站新增数据后，需等下一次定时推送才会出现在备用站。

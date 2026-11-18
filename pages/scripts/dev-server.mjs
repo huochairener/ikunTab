@@ -35,6 +35,25 @@ function loadEnvFile() {
 
 loadEnvFile();
 
+// 本地内存版 KV：模拟 ESA 绑定的 KV 命名空间（仅进程内，重启即清空）。
+// 真实的 ESA KV 会在 env 里以绑定名的形式出现，本地用同名对象顶上。
+function createMemoryKV() {
+  const store = new Map();
+  return {
+    async get(key) {
+      return store.has(key) ? store.get(key) : null;
+    },
+    async put(key, value) {
+      store.set(key, String(value));
+    },
+    async delete(key) {
+      store.delete(key);
+    },
+  };
+}
+
+const memoryKV = createMemoryKV();
+
 const port = Number(process.env.PORT || 18080);
 const host = process.env.HOST || '127.0.0.1';
 const distDir = join(pagesDir, 'dist');
@@ -120,7 +139,10 @@ const server = createServer(async (req, res) => {
       }
     }
     const request = await toRequest(req);
-    const response = await handler.fetch(request, {}, process.env);
+    // 本地把内存 KV 以绑定名注入 env，让镜像模式可直接跑通
+    const bindingName = process.env.IKUN_KV_BINDING || 'IKUN_KV';
+    const runtimeEnv = { ...process.env, [bindingName]: memoryKV };
+    const response = await handler.fetch(request, {}, runtimeEnv);
     await writeResponse(res, response);
   } catch (err) {
     console.error('[dev]', err);

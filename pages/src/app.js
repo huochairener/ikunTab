@@ -1,4 +1,4 @@
-// 请求分发：直连数据库 / 回退主站代理 / 统一异常处理
+// 请求分发：KV 只读镜像（默认）/ 直连数据库 / 回退主站代理 / 统一异常处理
 import { createRouter } from './router.js';
 import { BizError, errorResponse, fail, json } from './http.js';
 import { dbDown, directDBUnavailable, isConnError, markDbDown } from './db.js';
@@ -11,6 +11,9 @@ import { settingRoutes } from './routes/settings.js';
 import { searchEngineRoutes } from './routes/search-engines.js';
 import { uploadRoutes } from './routes/upload.js';
 import { createProxyRoutes } from './routes/proxy.js';
+import { syncRoutes } from './routes/sync.js';
+import { mirrorAuthRoutes } from './auth-mirror.js';
+import { mirrorRoutes, mirrorStatelessRoutes } from './routes-mirror.js';
 
 const API_NOT_FOUND = () => json(fail('接口不存在', 404), 404);
 
@@ -27,10 +30,16 @@ export async function handleRequest(request, cfg) {
   const url = new URL(request.url);
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
 
-  // 上传的图片/背景：转发到主站（备用站没有持久化磁盘）
+  // 上传的图片/背景：转发到主站（备用站没有持久化磁盘）。
+  // 主站宕机时降级为 404/502，而不是让异常冒泡成 599。
   if (pathname.startsWith('/uploads/')) {
     if (!cfg.uploadOrigin && !cfg.apiOrigin) return new Response('Not Found', { status: 404 });
-    return proxyAsset(request, cfg);
+    try {
+      return await proxyAsset(request, cfg);
+    } catch (err) {
+      console.error('[ikun-tab] uploads proxy failed:', err?.message || err);
+      return new Response('Not Found', { status: 404 });
+    }
   }
 
   if (!pathname.startsWith('/api/')) return API_NOT_FOUND();
@@ -50,14 +59,19 @@ export async function handleRequest(request, cfg) {
   }
 
   const router = createRouter([
-    ...authRoutes,
-    ...groupRoutes,
-    ...bookmarkRoutes,
-    ...widgetRoutes,
-    ...settingRoutes,
-    ...searchEngineRoutes,
-    ...uploadRoutes,
-    ...createProxyRoutes(cfg),
+    ...syncRoutes,
+    ...(cfg.dataSource === 'mirror'
+      ? [...mirrorAuthRoutes, ...mirrorRoutes, ...mirrorStatelessRoutes(cfg)]
+      : [
+          ...authRoutes,
+          ...groupRoutes,
+          ...bookmarkRoutes,
+          ...widgetRoutes,
+          ...settingRoutes,
+          ...searchEngineRoutes,
+          ...uploadRoutes,
+          ...createProxyRoutes(cfg),
+        ]),
   ]);
 
   const matched = router(request.method, pathname);
@@ -70,6 +84,17 @@ export async function handleRequest(request, cfg) {
   }
 
   const ctx = { request, cfg, url, params: matched.params, rawBody };
+
+  // ---- KV 只读镜像：数据全部来自 KV，不需要数据库也不依赖主站 ----
+  if (cfg.dataSource === 'mirror') {
+    try {
+      return await matched.handler(ctx);
+    } catch (err) {
+      if (err instanceof BizError) return errorResponse(err);
+      console.error('[ikun-tab] mirror unhandled:', err?.stack || err);
+      return json(fail('系统异常，请稍后重试', 500), 500);
+    }
+  }
 
   // 直连模式永久不可用（边缘函数无 TCP，mysql2 加载失败过）也归入代理模式
   const proxyOnly =
