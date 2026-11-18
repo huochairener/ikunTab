@@ -48,6 +48,8 @@ async function forward(request, base, { timeoutMs = 15000, body = null } = {}) {
     headers,
     redirect: 'manual',
     signal: safeTimeout(timeoutMs),
+    // 复用边缘节点到主站的连接，避免每次请求都重新握手（主站是 HTTP/1.1，无 h2 多路复用）
+    keepalive: true,
   };
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     init.body = body instanceof Uint8Array ? body : await request.arrayBuffer();
@@ -70,7 +72,14 @@ async function forward(request, base, { timeoutMs = 15000, body = null } = {}) {
     if (single) outHeaders.append('set-cookie', single);
   }
 
-  return new Response(upstream.body, { status: upstream.status, headers: outHeaders });
+  // 关键：不能把 upstream.body（ReadableStream）直接透传给客户端。
+  // ESA 边缘函数在流式透传时，若两个 chunk 的读取间隔超过内部阈值，会抛
+  // "exceeded timeout between two consecutive response body reads"，
+  // 同时流式搬运会吃掉大量 CPU（配额仅 100ms）。
+  // 接口响应体积很小（书签列表也就几百字节到几十 KB），先完整读入内存再返回。
+  const buffer = await upstream.arrayBuffer();
+
+  return new Response(buffer, { status: upstream.status, headers: outHeaders });
 }
 
 export function hasUpstream(cfg) {
