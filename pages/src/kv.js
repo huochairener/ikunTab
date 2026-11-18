@@ -150,6 +150,22 @@ export async function inspectKV(cfg) {
     ownKeys: [],
     protoKeys: [],
     envKeysSample: Object.keys(env).slice(0, 60),
+    // 每个 env 值的类型，便于识别哪个才是真正的 KV 句柄
+    envTypes: Object.fromEntries(
+      Object.keys(env).slice(0, 60).map((k) => {
+        try {
+          const v = env[k];
+          return [k, v === null || v === undefined ? 'undefined' : typeof v];
+        } catch {
+          return [k, 'unreadable'];
+        }
+      }),
+    ),
+    globals: {
+      globalKV: typeof globalThis.kv,
+      globalKVNamespace: typeof globalThis.KV,
+      globalCaches: typeof globalThis.caches,
+    },
     writeTest: null,
     readTest: null,
   };

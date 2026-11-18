@@ -66,5 +66,11 @@ for (const t of info.writeTest || []) {
 console.log('');
 console.log('读回测试:', JSON.stringify(info.readTest));
 console.log('');
-console.log('env 中可见的键（前 60 个）:');
-console.log('  ' + (info.envKeysSample || []).join(', '));
+console.log('env 中可见的键及其类型（前 60 个）:');
+const types = info.envTypes || {};
+for (const k of info.envKeysSample || []) {
+  const t = types[k] || '?';
+  console.log(`  ${k}: ${t}`);
+}
+console.log('');
+console.log('全局对象:', JSON.stringify(info.globals));
