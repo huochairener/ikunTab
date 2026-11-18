@@ -1,0 +1,27 @@
+# Shell 脚本：强制 LF 行尾，否则在 Linux 上会报 bad interpreter
+*.sh text eol=lf
+
+# Node 脚本（shebang 或直接被 node 执行）：同样用 LF
+pages/scripts/*.mjs text eol=lf
+
+# 其余源码保持 LF（跨平台一致性）
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.sql text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Windows 专属脚本保留 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff2 binary
