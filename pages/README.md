@@ -133,7 +133,7 @@ npm run push:dry    # 或 ./push.sh --dry-run
 ```bash
 cd pages
 npm install
-npm run test:mirror   # 镜像模式端到端测试（内存 KV，无需 MySQL/ESA）：39 项
+npm run test:mirror   # 镜像模式端到端测试（内存 KV，无需 MySQL/ESA）：45 项
 npm run check         # 冒烟测试：11 项
 npm run dev           # http://127.0.0.1:18080（dev-server 内置内存 KV）
 ```
