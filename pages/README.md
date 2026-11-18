@@ -54,33 +54,57 @@ ESA 控制台 → 项目 → 基本信息 → **函数变量 / 绑定**：
 
 > `IKUN_DATA_SOURCE` 默认就是 `mirror`，可不配。
 
-### 3. 首次推送数据
-
-在主站机器（或任意能连到主站 MySQL 的机器）执行：
+### 3. 配置（只需一次）
 
 ```bash
 cd pages
 npm install
-IKUN_MYSQL_HOST=127.0.0.1 \
-IKUN_MYSQL_USER=root \
-IKUN_MYSQL_PASSWORD=你的数据库密码 \
-IKUN_MYSQL_DB=ikuntab \
-IKUN_SYNC_URL=https://ikuntab.glare.work \
-IKUN_SYNC_SECRET=与ESA函数变量一致 \
-IKUN_MIRROR_USERNAME=zmq \
-IKUN_MIRROR_PASSWORD=你的登录密码 \
-node scripts/sync-push.mjs
+cp .env.example .env
 ```
 
-成功会返回各表同步条数。
+然后编辑 `pages/.env`，填好这几项（其余留空即可）：
 
-### 4. 设置定时同步（推荐每小时）
+| 变量 | 说明 |
+|------|------|
+| `IKUN_SYNC_URL` | 备用站地址，如 `https://ikuntab.glare.work` |
+| `IKUN_SYNC_SECRET` | 与 ESA 控制台函数变量一致 |
+| `IKUN_MIRROR_USERNAME` | 你的主站账号名 |
+| `IKUN_MIRROR_PASSWORD` | 你的主站登录密码（仅本地算哈希，不上传） |
+| `IKUN_MYSQL_HOST` / `USER` / `PASSWORD` / `DB` | 主站数据库连接 |
+
+> `pages/.env` 已在 `.gitignore` 中，不会提交到仓库。
+
+### 4. 推送数据（一条命令）
+
+```bash
+cd pages
+npm run push      # 或 ./push.sh
+```
+
+输出示例：
+
+```
+[push] 目标：https://ikuntab.glare.work
+[push] 账号：zmq
+[push] 读取到：用户 1 / 分组 2 / 书签 47 / 设置 1 / 引擎 1
+[sync] 推送成功：{"code":0,...}
+```
+
+先验证配置是否正确（只检查配置和数据库，不真正推送）：
+
+```bash
+npm run push:dry    # 或 ./push.sh --dry-run
+```
+
+### 5. 定时同步（推荐每小时）
+
+配置好 `.env` 之后，cron 只需要一行，不用重复写环境变量：
 
 ```cron
-0 * * * * cd /path/to/ikun-tab/pages && /usr/bin/node scripts/sync-push.mjs >> /var/log/ikun-sync.log 2>&1
+0 * * * * cd /path/to/ikun-tab/pages && ./push.sh >> /var/log/ikun-push.log 2>&1
 ```
 
-（把上面那串 `IKUN_*` 环境变量写进 `.env` 或 shell 脚本里。）
+`push.sh` 会自动读取同目录的 `.env`。
 
 ## 接口清单（镜像模式）
 

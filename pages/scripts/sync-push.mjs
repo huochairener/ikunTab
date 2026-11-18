@@ -111,7 +111,7 @@ async function loadMysql() {
   return mod.default ?? mod;
 }
 
-async function main() {
+export async function main({ dryRun = false } = {}) {
   const syncUrl = env('IKUN_SYNC_URL').replace(/\/+$/, '');
   const secret = env('IKUN_SYNC_SECRET');
   if (!syncUrl) throw new Error('缺少 IKUN_SYNC_URL（备用站地址，如 https://ikuntab.glare.work）');
@@ -128,6 +128,9 @@ async function main() {
 
   const salt = deriveSalt(secret);
   const passwordHash = lightHash(salt, mirrorPassword);
+
+  console.log(`[push] 目标：${syncUrl}`);
+  console.log(`[push] 账号：${mirrorUsername}`);
 
   const mysql = await loadMysql();
   const options = {
@@ -177,24 +180,43 @@ async function main() {
       searchEngines: engineRows.map(mapEngine),
     };
 
-    const resp = await fetch(`${syncUrl}/api/sync`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${secret}`,
-      },
-      body: JSON.stringify(snapshot),
-    });
+    console.log(
+      `[push] 读取到：用户 ${snapshot.users.length} / 分组 ${snapshot.groups.length} / ` +
+        `书签 ${snapshot.bookmarks.length} / 设置 ${snapshot.settings.length} / 引擎 ${snapshot.searchEngines.length}`,
+    );
+
+    if (dryRun) {
+      console.log('[push] --dry-run：配置与数据库均正常，未真正推送。');
+      return;
+    }
+
+    let resp;
+    try {
+      resp = await fetch(`${syncUrl}/api/sync`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${secret}`,
+        },
+        body: JSON.stringify(snapshot),
+      });
+    } catch (err) {
+      const cause = err?.cause?.code || err?.cause?.message || err?.message || '';
+      throw new Error(`无法连接备用站 ${syncUrl}（${cause}）：请确认地址正确、站点已部署`);
+    }
 
     const text = await resp.text();
-    if (!resp.ok) throw new Error(`推送失败：HTTP ${resp.status} ${text}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} ${text}`);
     let parsed = null;
     try {
       parsed = JSON.parse(text);
     } catch {
       /* ignore */
     }
-    if (parsed && parsed.code !== 0) throw new Error(`推送失败：${parsed.msg || text}`);
+    if (parsed && parsed.code !== 0) {
+      const hint = parsed.code === 401 ? '（IKUN_SYNC_SECRET 与 ESA 函数变量不一致）' : '';
+      throw new Error(`${parsed.msg || text}${hint}`);
+    }
     console.log(`[sync] 推送成功：${text}`);
   } finally {
     await conn.end();
