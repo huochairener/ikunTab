@@ -4,6 +4,10 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
+# 构建期可切换 npm 源；默认值与官方一致，不改变默认行为
+ARG NPM_REGISTRY=https://registry.npmjs.org
+ENV npm_config_registry=${NPM_REGISTRY}
+
 COPY frontend/package*.json ./
 RUN npm ci
 
