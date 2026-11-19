@@ -273,8 +273,7 @@ defineExpose({ showDock, startEdit, deleteGroup })
           <!-- 添加按钮 -->
           <button
             class="orbit-item add"
-            :style="getDockItemStyle(app.groups.length)"
-            @mouseenter="setHoveredIdx(app.groups.length)"
+            @mouseenter="setHoveredIdx(null)"
             @click="showAddInput = true"
           >
             <Plus :size="16" />
@@ -388,6 +387,10 @@ defineExpose({ showDock, startEdit, deleteGroup })
 .orbit-item.prev .dot,
 .orbit-item.next .dot {
   opacity: 0.7;
+}
+.orbit-item.add {
+  transition: none;
+  will-change: auto;
 }
 .orbit-item.add .dot {
   background: transparent; border: 1.5px dashed var(--glass-border);
