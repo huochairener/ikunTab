@@ -11,6 +11,7 @@ const editingId = ref<number | null>(null)
 const editingName = ref('')
 const showAddInput = ref(false)
 const newName = ref('')
+const hoveredIdx = ref<number | null>(null)
 
 const currentIdx = computed(() =>
   app.groups.findIndex((g) => g.id === app.currentGroupId),
@@ -28,6 +29,21 @@ function showDock() {
 
 function keepDock() {
   if (hideTimer.value) window.clearTimeout(hideTimer.value)
+}
+
+/* ============ Dock 悬浮放大 ============ */
+function setHoveredIdx(idx: number | null) {
+  hoveredIdx.value = idx
+}
+
+function getDockItemStyle(idx: number) {
+  if (hoveredIdx.value === null) return undefined
+
+  const distance = Math.abs(idx - hoveredIdx.value)
+  if (distance === 0) return { transform: 'translateY(-11px) scale(1.28)' }
+  if (distance === 1) return { transform: 'translateY(-4px) scale(1.12)' }
+  if (distance === 2) return { transform: 'translateY(-1px) scale(1.05)' }
+  return undefined
 }
 
 /* ============ 切换分组 ============ */
@@ -239,14 +255,15 @@ defineExpose({ showDock, startEdit, deleteGroup })
         </div>
 
         <!-- 默认态：轨道按钮 -->
-        <div v-else class="orbit" @wheel.prevent="onWheel">
+        <div v-else class="orbit" @wheel.prevent="onWheel" @mouseleave="setHoveredIdx(null)">
           <button
             v-for="(g, i) in app.groups"
             :key="g.id"
             class="orbit-item"
             :class="{ on: g.id === app.currentGroupId, prev: i === currentIdx - 1, next: i === currentIdx + 1 }"
-            :style="{ '--idx': i - currentIdx }"
+            :style="getDockItemStyle(i)"
             @click="switchTo(i)"
+            @mouseenter="setHoveredIdx(i)"
             @contextmenu.prevent="startEdit(g.id, g.name)"
           >
             <span class="dot">{{ g.icon || g.name.charAt(0) }}</span>
@@ -254,7 +271,12 @@ defineExpose({ showDock, startEdit, deleteGroup })
           </button>
 
           <!-- 添加按钮 -->
-          <button class="orbit-item add" @click="showAddInput = true">
+          <button
+            class="orbit-item add"
+            :style="getDockItemStyle(app.groups.length)"
+            @mouseenter="setHoveredIdx(app.groups.length)"
+            @click="showAddInput = true"
+          >
             <Plus :size="16" />
           </button>
         </div>
@@ -296,6 +318,7 @@ defineExpose({ showDock, startEdit, deleteGroup })
   border-radius: 999px;
   display: flex; align-items: center; gap: 12px;
   transform-style: preserve-3d;
+  overflow: visible;
 }
 
 /* 当前组名标签 */
@@ -319,7 +342,8 @@ defineExpose({ showDock, startEdit, deleteGroup })
 
 /* 轨道 */
 .orbit {
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: flex-end; gap: 4px;
+  padding: 8px 4px 2px;
 }
 .orbit-item {
   position: relative;
@@ -328,18 +352,22 @@ defineExpose({ showDock, startEdit, deleteGroup })
   cursor: pointer; padding: 0;
   display: flex; align-items: center; justify-content: center;
   border-radius: 50%;
-  transition: all 0.25s cubic-bezier(0.22, 0.61, 0.36, 1);
-  transform: translateZ(0);
+  transition: transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1), filter 0.25s ease;
+  transform: translateY(0) scale(1);
+  transform-origin: center bottom;
+  will-change: transform;
+  z-index: 1;
 }
+.orbit-item:hover { z-index: 4; }
 .orbit-item .dot {
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: 50%;
   background: var(--input-bg); color: var(--text-secondary);
   font-size: 13px;
-  transition: all 0.25s;
+  transition: background 0.25s, color 0.25s, box-shadow 0.25s;
 }
 .orbit-item .tip {
-  position: absolute; bottom: -28px; left: 50%;
+  position: absolute; bottom: -30px; left: 50%;
   transform: translateX(-50%) translateY(-4px);
   background: var(--text-primary); color: var(--bg-base);
   font-size: 10px; padding: 2px 6px; border-radius: 4px;
@@ -353,6 +381,9 @@ defineExpose({ showDock, startEdit, deleteGroup })
   background: var(--accent); color: #fff;
   transform: scale(1.15);
   box-shadow: 0 4px 12px rgba(31, 182, 166, 0.45);
+}
+.orbit-item:hover .dot {
+  box-shadow: 0 8px 18px rgba(31, 182, 166, 0.28);
 }
 .orbit-item.prev .dot,
 .orbit-item.next .dot {
@@ -381,4 +412,9 @@ defineExpose({ showDock, startEdit, deleteGroup })
 
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s, transform 0.2s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(4px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit-item { transition: none; }
+  .orbit-item:hover .tip { transition: none; }
+}
 </style>

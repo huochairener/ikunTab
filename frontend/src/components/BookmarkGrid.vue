@@ -7,6 +7,7 @@ import { useAppStore } from '@/store/app'
 import BookmarkItem from './BookmarkItem.vue'
 import BookmarkModal from './BookmarkModal.vue'
 import FolderModal from './FolderModal.vue'
+import MoveGroupModal from './MoveGroupModal.vue'
 import ContextMenu from './ContextMenu.vue'
 
 const app = useAppStore()
@@ -187,6 +188,7 @@ function closeMenu() {
 /* ============ 编辑/打开文件夹 ============ */
 const editTarget = ref<Bookmark | null>(null)
 const folderTarget = ref<Bookmark | null>(null)
+const moveGroupTarget = ref<Bookmark | null>(null)
 const addOpen = ref(false)
 
 function onAdd() {
@@ -203,6 +205,21 @@ function onEdit(bm: Bookmark) {
 function onOpenFolder(bm: Bookmark) {
   folderTarget.value = bm
   closeMenu()
+}
+
+/** 打开「移动分组」弹窗（仅文件夹） */
+function onMoveGroup(bm: Bookmark) {
+  moveGroupTarget.value = bm
+  closeMenu()
+}
+
+/** 移动分组成功后关闭相关弹窗，并切到目标分组方便确认结果 */
+async function onMovedToGroup(targetGroupId: number) {
+  moveGroupTarget.value = null
+  // 分组切换后原文件夹弹窗的数据来自旧分组；移动嵌套文件夹时也要一并关闭。
+  folderTarget.value = null
+  if (targetGroupId !== app.currentGroupId) await app.switchGroup(targetGroupId)
+  else await app.loadGroupData()
 }
 
 async function onDelete(bm: Bookmark) {
@@ -232,6 +249,9 @@ function onMenuAction(action: string, bm: Bookmark) {
       break
     case 'split':
       onSplitOut(bm)
+      break
+    case 'moveGroup':
+      onMoveGroup(bm)
       break
   }
 }
@@ -318,6 +338,14 @@ defineExpose({ addBookmark: onAdd })
       @edit="onEdit"
       @menu="openMenu"
       @changed="app.loadGroupData()"
+    />
+
+    <!-- 移动分组弹窗 -->
+    <MoveGroupModal
+      v-if="moveGroupTarget"
+      :folder="moveGroupTarget"
+      @close="moveGroupTarget = null"
+      @moved="(gid: number) => onMovedToGroup(gid)"
     />
 
     <!-- 右键菜单 -->

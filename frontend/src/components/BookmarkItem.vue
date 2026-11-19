@@ -28,16 +28,11 @@ const src = computed(() => (props.bm.iconType === 'default' ? null : iconUrl(pro
 const showLetter = computed(() => !src.value || imgError.value)
 const domain = computed(() => domainOf(props.bm.url))
 
-/* 文件夹：有子书签就显示堆叠图标；子书签 > 7 时才在末尾加"名称占位"虚拟图标，并去掉右侧文件夹名称 */
-const FOLDER_NAME_CHIP_THRESHOLD = 7
+/* 文件夹：有子书签就显示渐隐堆叠图标，数量单独放在卡片最右侧（小号数字） */
 const MAX_VISIBLE_ICONS = 3
 const childErr = ref<Record<number, boolean>>({})
 const hasChildren = computed(
   () => props.bm.type === 1 && !!props.children && props.children.length > 0,
-)
-/* 子书签过多时启用末尾数量占位（右侧改显示文件夹名称） */
-const useNameChip = computed(
-  () => hasChildren.value && props.children!.length > FOLDER_NAME_CHIP_THRESHOLD,
 )
 const visibleChildIcons = computed(() => {
   if (!hasChildren.value) return []
@@ -84,9 +79,6 @@ function onClick() {
               <img v-if="ci.src && !childErr[i]" :src="ci.src" alt="" @error="childErr[i] = true" />
               <span v-else class="fs-letter">{{ ci.ch }}</span>
             </div>
-            <div v-if="useNameChip" class="fs-name">
-              <span class="fs-name-text">{{ childCount }}</span>
-            </div>
           </div>
         </template>
         <template v-else>
@@ -96,17 +88,14 @@ function onClick() {
         </template>
       </div>
       <div class="meta">
-        <template v-if="useNameChip">
-          <span class="url">{{ bm.name }}</span>
-        </template>
-        <template v-else>
-          <span class="name">{{ bm.name }}</span>
-          <span class="url">{{ bm.type === 1 ? '文件夹' : domain || '书签' }}</span>
-        </template>
+        <span class="name">{{ bm.name }}</span>
+        <span class="url">{{ bm.type === 1 ? '文件夹' : domain || '书签' }}</span>
       </div>
       <button class="more" @click.stop="emit('menu', $event.clientX, $event.clientY)">
         <MoreVertical :size="14" />
       </button>
+      <!-- 文件夹内书签数量：卡片最右侧，比图标更小的角标 -->
+      <span v-if="hasChildren" class="bm-count">{{ childCount }}</span>
     </div>
     <transition name="fade">
       <div v-if="hoverMode === 'merge'" class="merge-tip">合并为文件夹</div>
@@ -145,7 +134,7 @@ function onClick() {
   width: 16px; height: 16px; display: flex; align-items: center; justify-content: center;
 }
 
-/* 文件夹（堆叠模式）：横向堆叠图标 + 末尾名称占位 */
+/* 文件夹（堆叠模式）：横向堆叠图标，末尾渐隐提示还有更多 */
 .icon-wrap.is-folder {
   width: auto;
   height: 34px;
@@ -181,28 +170,7 @@ function onClick() {
 }
 .fs-letter { font-size: 11px; font-weight: 600; color: var(--accent); }
 
-/* 末尾名称占位：与图标同尺寸（正方形 28×28），文字换行显示 */
-.fs-name {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  padding: 2px;
-  overflow: hidden;
-  line-height: 1.05;
-}
-.fs-name-text {
-  font-size: 9px; font-weight: 600;
-  word-break: break-all;
-  white-space: normal;
-  letter-spacing: -0.3px;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-align: center;
-}
-/* 还有未展示的子书签时，最后一个实际书签图标从右到左渐隐，提示"未完全展示"；
-   末尾的数量占位（逻辑书签）不应用渐隐 */
+/* 还有未展示的子书签时，最后一个书签图标从右到左渐隐，提示"未完全展示" */
 .fs-item.faded {
   -webkit-mask-image: linear-gradient(to left, #000 55%, transparent 100%);
   mask-image: linear-gradient(to left, #000 55%, transparent 100%);
@@ -216,6 +184,19 @@ function onClick() {
 }
 .bm:hover .more { opacity: 1; }
 .more:hover { background: var(--input-bg); }
+/* 文件夹内书签数量：位于卡片最右侧，尺寸明显小于图标（18px vs 28/34px） */
+.bm-count {
+  flex-shrink: 0;
+  min-width: 18px; height: 18px;
+  padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: var(--input-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  font-size: 10px; font-weight: 600; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
 /* 触摸设备：补上只有 hover 才可见的操作入口，并避免横滑切组时误选文字 */
 @media (hover: none) {
   .more { opacity: 0.55; }

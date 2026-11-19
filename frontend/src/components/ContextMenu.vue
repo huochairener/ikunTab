@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
-import { Pencil, ExternalLink, Trash2, ArrowUp } from 'lucide-vue-next'
+import { Pencil, ExternalLink, Trash2, ArrowUp, FolderInput } from 'lucide-vue-next'
 import type { Bookmark } from '@/types'
 
 const props = defineProps<{
@@ -28,9 +28,9 @@ function act(a: string) {
   emit('close')
 }
 
-// 防止超出右边界
+// 防止超出右边界（文件夹菜单比书签菜单多一项，预留更多高度）
 const left = Math.min(props.x, window.innerWidth - 170)
-const top = Math.min(props.y, window.innerHeight - 180)
+const top = Math.min(props.y, window.innerHeight - 220)
 </script>
 
 <template>
@@ -41,6 +41,9 @@ const top = Math.min(props.y, window.innerHeight - 180)
     </button>
     <button v-if="bm.parentId !== null" class="item" @click="act('split')">
       <ArrowUp :size="14" /> 移出文件夹
+    </button>
+    <button v-if="bm.type === 1" class="item" @click="act('moveGroup')">
+      <FolderInput :size="14" /> 移动分组
     </button>
     <button class="item" @click="act('edit')">
       <Pencil :size="14" /> 编辑
