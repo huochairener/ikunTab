@@ -28,8 +28,8 @@ const src = computed(() => (props.bm.iconType === 'default' ? null : iconUrl(pro
 const showLetter = computed(() => !src.value || imgError.value)
 const domain = computed(() => domainOf(props.bm.url))
 
-/* 文件夹：有子书签就显示渐隐堆叠图标，数量单独放在卡片最右侧（小号数字） */
-const MAX_VISIBLE_ICONS = 3
+/* 文件夹：有子书签就显示堆叠图标（最多 4 个，超出时最后一个按从左到右渐隐），数量单独放在卡片最右侧（小号数字） */
+const MAX_VISIBLE_ICONS = 4
 const childErr = ref<Record<number, boolean>>({})
 const hasChildren = computed(
   () => props.bm.type === 1 && !!props.children && props.children.length > 0,
@@ -41,7 +41,7 @@ const visibleChildIcons = computed(() => {
     ch: letter(c.name),
   }))
 })
-/* 是否还有未展示的子书签（决定前面的实际书签图标是否应用渐隐效果） */
+/* 是否还有未展示的子书签（有则最后一个书签图标按从左到右渐隐） */
 const hasMore = computed(
   () => !!props.children && props.children.length > visibleChildIcons.value.length,
 )
@@ -69,7 +69,7 @@ function onClick() {
     <div class="bm-inner">
       <div class="icon-wrap" :class="{ 'is-folder': hasChildren }">
         <template v-if="hasChildren">
-          <div class="folder-stack">
+          <div class="folder-stack" :class="'s' + visibleChildIcons.length">
             <div
               v-for="(ci, i) in visibleChildIcons"
               :key="i"
@@ -155,14 +155,15 @@ function onClick() {
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0; position: relative;
 }
-/* 后一个压住前一个的 1/2 */
-.folder-stack > * + * { margin-left: -14px; }
+/* 间距随数量收紧：全部叠压，数量越多叠得越密，整体占宽基本一致 */
+.folder-stack.s2 > * + * { margin-left: -12px; }
+.folder-stack.s3 > * + * { margin-left: -15px; }
+.folder-stack.s4 > * + * { margin-left: -18px; }
 /* 越靠后越在上层 */
 .folder-stack > *:nth-child(1) { z-index: 1; }
 .folder-stack > *:nth-child(2) { z-index: 2; }
 .folder-stack > *:nth-child(3) { z-index: 3; }
 .folder-stack > *:nth-child(4) { z-index: 4; }
-.folder-stack > *:nth-child(5) { z-index: 5; }
 
 .fs-item img {
   width: 22px; height: 22px;
@@ -170,10 +171,10 @@ function onClick() {
 }
 .fs-letter { font-size: 11px; font-weight: 600; color: var(--accent); }
 
-/* 还有未展示的子书签时，最后一个书签图标从右到左渐隐，提示"未完全展示" */
+/* 还有未展示的子书签时，最后一个（第 4 个）书签图标按从左到右渐隐，提示"未完全展示" */
 .fs-item.faded {
-  -webkit-mask-image: linear-gradient(to left, #000 55%, transparent 100%);
-  mask-image: linear-gradient(to left, #000 55%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 55%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 55%, transparent 100%);
 }
 .meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
