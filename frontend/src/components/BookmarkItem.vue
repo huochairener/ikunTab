@@ -191,9 +191,9 @@ function onClick() {
   padding: 0 5px;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 999px;
-  background: var(--input-bg);
-  border: 1px solid var(--glass-border);
-  color: var(--text-secondary);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
   font-size: 10px; font-weight: 600; line-height: 1;
   font-variant-numeric: tabular-nums;
 }
